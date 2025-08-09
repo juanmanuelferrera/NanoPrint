@@ -34,6 +34,7 @@ jobs:
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
           cp dist/NanoPrint AppDir/usr/bin/
+          chmod +x AppDir/usr/bin/NanoPrint
           # Minimal desktop entry
           cat > AppDir/NanoPrint.desktop << 'EOF'
           [Desktop Entry]
