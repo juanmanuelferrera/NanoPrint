@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanorosetta-layout"
+version = "0.2.0"
+description = "Any-shape PDF page layout CLI (NanoRosetta-style)"
+authors = [{name = "Your Name"}]
+requires-python = ">=3.10"
+dependencies = [
+  "pymupdf>=1.23.8",
+  "Pillow>=10.2.0",
+  "numpy>=1.26.0",
+  "shapely>=2.0.1",
+  "svgpathtools>=1.6.1",
+]
+
+[project.scripts]
+nanorosetta = "nanorosetta.cli:main"

@@ -1,0 +1,24 @@
+build/
+dist/
+*.spec
+__pycache__/
+.venv/
+*.dmg
+*.exe
+*.zip
+
+# Virtual envs
+.venv*/
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.spec
+*.dmg
+*.exe
+*.tif
+*.tiff
+
+# OS
+.DS_Store
