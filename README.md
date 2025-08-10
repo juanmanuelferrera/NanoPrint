@@ -1,10 +1,10 @@
-# Any‑Shape Wafer Layout (NanoRosetta‑style) – CLI MVP
+# Any‑Shape Wafer Layout (NanoRosetta‑style) – CLI + GUI
 
-CLI tool that places large numbers of PDF pages "around" any inner shape and constrained to any outer shape. Inputs are PDF pages and SVG paths (inner keep‑outs and outer boundary). Exports a vector PDF proof and optional 1‑bit TIFF suitable for laser workflows.
+CLI/GUI tool that places large numbers of PDF pages "around" any inner shape and constrained to any outer shape. Inputs are PDF pages and SVG paths (inner keep‑outs and outer boundary). Exports a vector PDF proof and optional 1‑bit TIFF suitable for laser workflows.
 
 Spec references: NanoRosetta's process and wafer geometry described at [nanorosetta.com/technology](https://nanorosetta.com/technology/).
 
-## Install
+## Install (for developers)
 
 Requires Python 3.10+.
 
@@ -14,7 +14,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Usage
+## GUI Usage (New)
+
+```bash
+python nanoprint.py
+```
+
+- Select Input PDFs, Outer SVG, and optional Inner SVGs
+- Use "Optimize for DPI" (e.g., 200 for large text docs)
+- Use "Max Canvas Pixels" (e.g., 50,000,000 for big jobs)
+- Clear buttons let you replace selections without restarting
+- Click Run to generate outputs (PDF proof and/or TIFF)
+
+## CLI Usage
 
 Example: wrap around a center circle (inner keep‑out) and constrain to a rectangle (outer boundary):
 
@@ -28,9 +40,15 @@ python -m nanorosetta.cli compose \
   --tiff-dpi 2400
 ```
 
-### DPI Optimization (New!)
+### Diagnose SVGs (New)
 
-Automatically calculate optimal page sizes to fill the available area efficiently:
+Quickly see which shape elements your SVG contains (path/rect/circle/ellipse):
+
+```bash
+python -m nanorosetta.cli diagnose ./examples/outer_rect.svg
+```
+
+### DPI Optimization (Improved)
 
 ```bash
 python -m nanorosetta.cli compose \
@@ -48,7 +66,7 @@ This will:
 4. **Place pages optimally** within the resized SVG area difference
 5. **Maintain original page aspect ratios**
 
-### Large Document Support (New!)
+### Large Document Support
 
 For documents with many pages (e.g., 2,000 pages), use memory management:
 
@@ -75,7 +93,13 @@ python -m nanorosetta.cli compose \
 4. **Resize SVG shapes** to accommodate the total area needed
 5. **Fit everything** within the resized SVG area difference
 
-Key options:
+### Overflow Prevention (New)
+
+- Automatic DPI reduction if computed pixel dimensions are too large
+- Conservative limits (~2^28 pixels/dimension) to avoid Pillow overflow
+- Clear suggestions if saving fails (lower DPI, use Target MB, reduce canvas)
+
+### Key Options
 - `--outer-shape PATH` SVG path for the outer constraint (supports arbitrary shapes)
 - `--inner-shape PATH` SVG path(s) for inner keep‑out; repeatable
 - `--optimize-for-dpi DPI` Calculate optimal page sizes to fill area at this DPI
@@ -92,12 +116,16 @@ python -m nanorosetta.cli compose --help
 ```
 
 ## How it works (MVP)
-- Parses SVG outer/inner shapes as polygons.
-- Computes the allowed region: outer minus inner(s) via polygon boolean ops.
-- **NEW**: Optionally calculates optimal page sizes to fill available area efficiently.
-- Generates a field of streamlines (offset/level sets) and places pages along paths with arc‑length spacing; avoids collisions; orients tangent or upright.
-- Renders a high‑DPI raster for TIFF; writes a PDF proof.
+- Parses SVG outer/inner shapes as polygons (supports path/rect/circle/ellipse)
+- Computes the allowed region: outer minus inner(s) via polygon boolean ops
+- Optionally calculates optimal page sizes to fill available area efficiently
+- Generates a field of streamlines and places pages along paths with arc‑length spacing
+- Renders a high‑DPI raster for TIFF; writes a PDF proof
+
+## Standalone Builds
+- Windows EXE, macOS App, and Linux AppImage are built via GitHub Actions
+- Download artifacts from the Actions page or Releases (when enabled)
 
 ## Roadmap
-- Pure vector PDF assembly (pages as XObjects with clipping) instead of raster proof
+- Pure vector PDF assembly (pages as XObjects with clipping)
 - Conformal mapping option for ultra‑uniform spacing
