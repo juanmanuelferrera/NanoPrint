@@ -30,6 +30,19 @@ def _collect_pages(input_paths: List[str]) -> Tuple[List[fitz.Document], List[Pa
     return docs, pages
 
 
+def cli_diagnose(args: argparse.Namespace) -> int:
+    """Diagnose an SVG file and show its contents."""
+    from .geometry import diagnose_svg_file
+    
+    try:
+        info = diagnose_svg_file(args.svg_file)
+        print(info)
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
 def cli_compose(args: argparse.Namespace) -> int:
     """Compose PDF pages around any inner shape constrained to any outer shape."""
     
@@ -209,6 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--canvas-bin-mm", type=float, help="Round canvas dimensions to multiples of this value (mm)")
 
     c.set_defaults(func=cli_compose)
+
+    # Add diagnose command
+    d = sub.add_parser("diagnose", help="Diagnose an SVG file and show its contents")
+    d.add_argument("svg_file", help="SVG file to diagnose")
+    d.set_defaults(func=cli_diagnose)
+
     return p
 
 

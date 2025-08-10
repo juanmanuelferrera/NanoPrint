@@ -7,32 +7,142 @@ from shapely.ops import unary_union
 from svgpathtools import svg2paths2
 
 
+def diagnose_svg_file(svg_path: str) -> str:
+    """Diagnose an SVG file and return information about its contents."""
+    try:
+        import xml.etree.ElementTree as ET
+        tree = ET.parse(svg_path)
+        root = tree.getroot()
+        
+        info = f"SVG file: {svg_path}\n"
+        info += f"Root element: {root.tag}\n"
+        
+        # Count different element types
+        elements = {}
+        for elem in root.iter():
+            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+            elements[tag] = elements.get(tag, 0) + 1
+        
+        info += "Elements found:\n"
+        for tag, count in elements.items():
+            info += f"  {tag}: {count}\n"
+        
+        # Check for specific shape elements
+        shape_elements = ['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline']
+        found_shapes = []
+        for shape in shape_elements:
+            count = len(root.findall(f'.//{{http://www.w3.org/2000/svg}}{shape}'))
+            if count > 0:
+                found_shapes.append(f"{shape}: {count}")
+        
+        if found_shapes:
+            info += f"Shape elements: {', '.join(found_shapes)}\n"
+        else:
+            info += "No shape elements found!\n"
+        
+        return info
+        
+    except Exception as e:
+        return f"Error diagnosing SVG file {svg_path}: {str(e)}"
+
+
 def parse_svg_path(svg_path: str) -> MultiPolygon:
     """Parse SVG file and convert to Shapely MultiPolygon."""
-    paths, attributes, svg_attributes = svg2paths2(svg_path)
-    
-    polygons = []
-    for path in paths:
-        # Convert path to polygon coordinates
-        coords = []
-        for segment in path:
-            if hasattr(segment, 'start'):
-                coords.append((segment.start.real, segment.start.imag))
-            if hasattr(segment, 'end'):
-                coords.append((segment.end.real, segment.end.imag))
+    try:
+        paths, attributes, svg_attributes = svg2paths2(svg_path)
         
-        if len(coords) >= 3:
-            # Close the polygon
-            if coords[0] != coords[-1]:
-                coords.append(coords[0])
-            polygon = Polygon(coords)
-            if polygon.is_valid:
-                polygons.append(polygon)
-    
-    if not polygons:
-        raise ValueError(f"No valid polygons found in {svg_path}")
-    
-    return MultiPolygon(polygons)
+        polygons = []
+        
+        # Handle path elements
+        for path in paths:
+            coords = []
+            for segment in path:
+                if hasattr(segment, 'start'):
+                    coords.append((segment.start.real, segment.start.imag))
+                if hasattr(segment, 'end'):
+                    coords.append((segment.end.real, segment.end.imag))
+            
+            if len(coords) >= 3:
+                # Close the polygon
+                if coords[0] != coords[-1]:
+                    coords.append(coords[0])
+                polygon = Polygon(coords)
+                if polygon.is_valid:
+                    polygons.append(polygon)
+        
+        # If no valid polygons found from paths, try to parse as basic shapes
+        if not polygons:
+            # Try to parse basic SVG shapes (rect, circle, ellipse, etc.)
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(svg_path)
+            root = tree.getroot()
+            
+            # Handle rectangle elements
+            for rect in root.findall('.//{http://www.w3.org/2000/svg}rect'):
+                x = float(rect.get('x', 0))
+                y = float(rect.get('y', 0))
+                width = float(rect.get('width', 0))
+                height = float(rect.get('height', 0))
+                
+                if width > 0 and height > 0:
+                    coords = [(x, y), (x + width, y), (x + width, y + height), (x, y + height), (x, y)]
+                    polygon = Polygon(coords)
+                    if polygon.is_valid:
+                        polygons.append(polygon)
+            
+            # Handle circle elements
+            for circle in root.findall('.//{http://www.w3.org/2000/svg}circle'):
+                cx = float(circle.get('cx', 0))
+                cy = float(circle.get('cy', 0))
+                r = float(circle.get('r', 0))
+                
+                if r > 0:
+                    # Create a polygon approximation of the circle
+                    import math
+                    num_points = 32
+                    coords = []
+                    for i in range(num_points + 1):
+                        angle = 2 * math.pi * i / num_points
+                        x = cx + r * math.cos(angle)
+                        y = cy + r * math.sin(angle)
+                        coords.append((x, y))
+                    
+                    polygon = Polygon(coords)
+                    if polygon.is_valid:
+                        polygons.append(polygon)
+            
+            # Handle ellipse elements
+            for ellipse in root.findall('.//{http://www.w3.org/2000/svg}ellipse'):
+                cx = float(ellipse.get('cx', 0))
+                cy = float(ellipse.get('cy', 0))
+                rx = float(ellipse.get('rx', 0))
+                ry = float(ellipse.get('ry', 0))
+                
+                if rx > 0 and ry > 0:
+                    # Create a polygon approximation of the ellipse
+                    import math
+                    num_points = 32
+                    coords = []
+                    for i in range(num_points + 1):
+                        angle = 2 * math.pi * i / num_points
+                        x = cx + rx * math.cos(angle)
+                        y = cy + ry * math.sin(angle)
+                        coords.append((x, y))
+                    
+                    polygon = Polygon(coords)
+                    if polygon.is_valid:
+                        polygons.append(polygon)
+        
+        if not polygons:
+            raise ValueError(f"No valid polygons found in {svg_path}. "
+                           f"Supported elements: <path>, <rect>, <circle>, <ellipse>. "
+                           f"Please check that the SVG contains valid shape elements.")
+        
+        return MultiPolygon(polygons)
+        
+    except Exception as e:
+        raise ValueError(f"Failed to parse SVG file {svg_path}: {str(e)}. "
+                        f"Please ensure the file is a valid SVG with shape elements.")
 
 
 def boolean_allowed_region(outer: MultiPolygon, inners: List[MultiPolygon]) -> MultiPolygon:
