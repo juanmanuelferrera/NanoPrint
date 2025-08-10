@@ -41,19 +41,22 @@ class NanoPrintGUI(tk.Tk):
         row = 0
         ttk.Label(frm, text="Input PDFs").grid(row=row, column=0, sticky=tk.W, **pad)
         ttk.Button(frm, text="Add PDFs", command=self._choose_pdfs).grid(row=row, column=1, sticky=tk.W, **pad)
+        ttk.Button(frm, text="Clear PDFs", command=self._clear_pdfs).grid(row=row, column=2, sticky=tk.W, **pad)
         self.pdf_list = tk.Listbox(frm, height=3)
-        self.pdf_list.grid(row=row, column=2, columnspan=3, sticky=tk.EW, **pad)
+        self.pdf_list.grid(row=row, column=3, columnspan=2, sticky=tk.EW, **pad)
 
         row += 1
         ttk.Label(frm, text="Outer SVG").grid(row=row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(frm, textvariable=self.outer_shape_var).grid(row=row, column=1, columnspan=3, sticky=tk.EW, **pad)
-        ttk.Button(frm, text="Browse", command=self._choose_outer).grid(row=row, column=4, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.outer_shape_var).grid(row=row, column=1, columnspan=2, sticky=tk.EW, **pad)
+        ttk.Button(frm, text="Browse", command=self._choose_outer).grid(row=row, column=3, sticky=tk.W, **pad)
+        ttk.Button(frm, text="Clear", command=self._clear_outer).grid(row=row, column=4, sticky=tk.W, **pad)
 
         row += 1
         ttk.Label(frm, text="Inner SVGs").grid(row=row, column=0, sticky=tk.W, **pad)
         ttk.Button(frm, text="Add Inner", command=self._choose_inners).grid(row=row, column=1, sticky=tk.W, **pad)
+        ttk.Button(frm, text="Clear Inners", command=self._clear_inners).grid(row=row, column=2, sticky=tk.W, **pad)
         self.inner_list = tk.Listbox(frm, height=3)
-        self.inner_list.grid(row=row, column=2, columnspan=3, sticky=tk.EW, **pad)
+        self.inner_list.grid(row=row, column=3, columnspan=2, sticky=tk.EW, **pad)
 
         # Options
         row += 1
@@ -109,19 +112,22 @@ class NanoPrintGUI(tk.Tk):
 
         row += 1
         ttk.Label(frm, text="Output PDF Proof").grid(row=row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(frm, textvariable=self.output_pdf_var).grid(row=row, column=1, columnspan=3, sticky=tk.EW, **pad)
-        ttk.Button(frm, text="Browse", command=self._choose_output_pdf).grid(row=row, column=4, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.output_pdf_var).grid(row=row, column=1, columnspan=2, sticky=tk.EW, **pad)
+        ttk.Button(frm, text="Browse", command=self._choose_output_pdf).grid(row=row, column=3, sticky=tk.W, **pad)
+        ttk.Button(frm, text="Clear", command=self._clear_output_pdf).grid(row=row, column=4, sticky=tk.W, **pad)
 
         row += 1
         ttk.Label(frm, text="Export TIFF").grid(row=row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(frm, textvariable=self.export_tiff_var).grid(row=row, column=1, columnspan=3, sticky=tk.EW, **pad)
-        ttk.Button(frm, text="Browse", command=self._choose_export_tiff).grid(row=row, column=4, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.export_tiff_var).grid(row=row, column=1, columnspan=2, sticky=tk.EW, **pad)
+        ttk.Button(frm, text="Browse", command=self._choose_export_tiff).grid(row=row, column=3, sticky=tk.W, **pad)
+        ttk.Button(frm, text="Clear", command=self._clear_export_tiff).grid(row=row, column=4, sticky=tk.W, **pad)
 
         # Run
         row += 1
         ttk.Button(frm, text="Run", command=self._run_async).grid(row=row, column=0, sticky=tk.W, **pad)
+        ttk.Button(frm, text="Clear All", command=self._clear_all).grid(row=row, column=1, sticky=tk.W, **pad)
         self.progress = ttk.Label(frm, text="Idle")
-        self.progress.grid(row=row, column=1, columnspan=3, sticky=tk.W, **pad)
+        self.progress.grid(row=row, column=2, columnspan=3, sticky=tk.W, **pad)
 
         # Log
         row += 1
@@ -138,33 +144,84 @@ class NanoPrintGUI(tk.Tk):
     def _choose_pdfs(self) -> None:
         paths = filedialog.askopenfilenames(title="Select PDF(s)", filetypes=[("PDF","*.pdf")])
         if paths:
-            self.input_pdfs.extend(list(paths))
+            # Replace existing PDFs instead of appending
+            self.input_pdfs = list(paths)
             self.pdf_list.delete(0, tk.END)
             for p in self.input_pdfs:
                 self.pdf_list.insert(tk.END, p)
+            self._log(f"Selected {len(self.input_pdfs)} PDF file(s)")
+
+    def _clear_pdfs(self) -> None:
+        self.input_pdfs = []
+        self.pdf_list.delete(0, tk.END)
+        self._log("Cleared PDF selections")
 
     def _choose_outer(self) -> None:
         p = filedialog.askopenfilename(title="Select outer SVG", filetypes=[("SVG","*.svg")])
         if p:
             self.outer_shape_var.set(p)
+            self._log(f"Selected outer SVG: {p}")
+
+    def _clear_outer(self) -> None:
+        self.outer_shape_var.set("")
+        self._log("Cleared outer SVG selection")
 
     def _choose_inners(self) -> None:
         paths = filedialog.askopenfilenames(title="Select inner SVG(s)", filetypes=[("SVG","*.svg")])
         if paths:
-            self.inner_shapes.extend(list(paths))
+            # Replace existing inner shapes instead of appending
+            self.inner_shapes = list(paths)
             self.inner_list.delete(0, tk.END)
             for p in self.inner_shapes:
                 self.inner_list.insert(tk.END, p)
+            self._log(f"Selected {len(self.inner_shapes)} inner SVG file(s)")
+
+    def _clear_inners(self) -> None:
+        self.inner_shapes = []
+        self.inner_list.delete(0, tk.END)
+        self._log("Cleared inner SVG selections")
 
     def _choose_output_pdf(self) -> None:
         p = filedialog.asksaveasfilename(title="Save PDF proof", defaultextension=".pdf", filetypes=[("PDF","*.pdf")])
         if p:
             self.output_pdf_var.set(p)
+            self._log(f"Selected output PDF: {p}")
+
+    def _clear_output_pdf(self) -> None:
+        self.output_pdf_var.set("")
+        self._log("Cleared output PDF selection")
 
     def _choose_export_tiff(self) -> None:
         p = filedialog.asksaveasfilename(title="Save TIFF", defaultextension=".tif", filetypes=[("TIFF","*.tif;*.tiff")])
         if p:
             self.export_tiff_var.set(p)
+            self._log(f"Selected export TIFF: {p}")
+
+    def _clear_export_tiff(self) -> None:
+        self.export_tiff_var.set("")
+        self._log("Cleared export TIFF selection")
+
+    def _clear_all(self) -> None:
+        self._clear_pdfs()
+        self._clear_outer()
+        self._clear_inners()
+        self._clear_output_pdf()
+        self._clear_export_tiff()
+        # Reset all parameters to defaults
+        self.nominal_height_var.set(3.0)
+        self.gap_var.set(0.5)
+        self.orientation_var.set("tangent")
+        self.canvas_margin_var.set(5.0)
+        self.canvas_bin_var.set(0.0)
+        self.target_mb_var.set(900.0)
+        self.tiff_mode_var.set("bilevel")
+        self.tiff_comp_var.set("lzw")
+        self.tiff_dpi_var.set(1200)
+        self.optimize_dpi_var.set(0)
+        self.max_canvas_pixels_var.set(100_000_000)
+        self.log.delete("1.0", tk.END)
+        self.progress.config(text="Idle")
+        self._log("Cleared all selections and reset to defaults")
 
     def _run_async(self) -> None:
         threading.Thread(target=self._run, daemon=True).start()
