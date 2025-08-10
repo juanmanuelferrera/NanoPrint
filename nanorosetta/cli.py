@@ -177,11 +177,19 @@ def cli_compose(args: argparse.Namespace) -> int:
 
     if args.export_tiff:
         os.makedirs(os.path.dirname(args.export_tiff) or ".", exist_ok=True)
-        if args.tiff_mode == "bilevel":
-            save_tiff_1bit(raster, args.export_tiff, dpi, compression=args.tiff_compression)
-        else:
-            save_tiff_gray(raster, args.export_tiff, dpi, compression=args.tiff_compression)
-        print(f"Wrote TIFF: {args.export_tiff}")
+        try:
+            if args.tiff_mode == "bilevel":
+                save_tiff_1bit(raster, args.export_tiff, dpi, compression=args.tiff_compression)
+            else:
+                save_tiff_gray(raster, args.export_tiff, dpi, compression=args.tiff_compression)
+            print(f"Wrote TIFF: {args.export_tiff}")
+        except Exception as e:
+            print(f"Error saving TIFF: {e}")
+            print("Suggestions:")
+            print("  - Reduce DPI (use --tiff-dpi with a lower value)")
+            print("  - Use --target-mb to automatically calculate safe DPI")
+            print("  - Reduce canvas size or number of pages")
+            raise
 
     for d in docs:
         d.close()

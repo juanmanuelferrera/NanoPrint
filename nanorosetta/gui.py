@@ -310,17 +310,26 @@ class NanoPrintGUI(tk.Tk):
                 origin_center=True,
             )
 
+            # Save outputs
             if self.output_pdf_var.get():
                 save_pdf_proof(raster, self.output_pdf_var.get(), width_mm, height_mm)
-                self._log(f"Wrote PDF proof: {self.output_pdf_var.get()}\n")
+                self._log(f"Wrote PDF proof: {self.output_pdf_var.get()}")
 
             if self.export_tiff_var.get():
-                comp = self.tiff_comp_var.get()
-                if tiff_mode == "bilevel":
-                    save_tiff_1bit(raster, self.export_tiff_var.get(), dpi, compression=comp)
-                else:
-                    save_tiff_gray(raster, self.export_tiff_var.get(), dpi, compression=comp)
-                self._log(f"Wrote TIFF: {self.export_tiff_var.get()}\n")
+                try:
+                    if self.tiff_mode_var.get() == "bilevel":
+                        save_tiff_1bit(raster, self.export_tiff_var.get(), dpi, compression=self.tiff_comp_var.get())
+                    else:
+                        save_tiff_gray(raster, self.export_tiff_var.get(), dpi, compression=self.tiff_comp_var.get())
+                    self._log(f"Wrote TIFF: {self.export_tiff_var.get()}")
+                except Exception as e:
+                    error_msg = f"Error saving TIFF: {e}\n\nSuggestions:\n"
+                    error_msg += "  - Reduce DPI (use a lower value in Fallback DPI)\n"
+                    error_msg += "  - Use Target MB to automatically calculate safe DPI\n"
+                    error_msg += "  - Reduce canvas size or number of pages\n"
+                    error_msg += "  - Try using 'gray' mode instead of 'bilevel'"
+                    self._log(error_msg)
+                    raise ValueError(error_msg)
 
             for d in docs:
                 d.close()

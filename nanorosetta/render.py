@@ -23,6 +23,44 @@ def _render_pdf_page_to_pil(src_doc: fitz.Document, page_index: int, target_heig
     return img
 
 
+def validate_canvas_dimensions(canvas_width_mm: float, canvas_height_mm: float, dpi: int) -> tuple[int, int, int]:
+    """
+    Validate canvas dimensions and return safe pixel dimensions and DPI.
+    
+    Args:
+        canvas_width_mm: Canvas width in mm
+        canvas_height_mm: Canvas height in mm
+        dpi: Target DPI
+    
+    Returns:
+        Tuple of (safe_width_px, safe_height_px, safe_dpi)
+    """
+    # PIL's maximum image dimensions (varies by system, but typically 2^31-1)
+    # Use a conservative limit of 2^28 (268,435,456 pixels) to be safe
+    max_pixels_per_dimension = 2**28
+    
+    # Calculate pixel dimensions
+    width_px = mm_to_px(canvas_width_mm, dpi)
+    height_px = mm_to_px(canvas_height_mm, dpi)
+    
+    # Check if dimensions are too large
+    if width_px > max_pixels_per_dimension or height_px > max_pixels_per_dimension:
+        # Calculate required DPI reduction
+        max_dimension_mm = max(canvas_width_mm, canvas_height_mm)
+        safe_dpi = int((max_pixels_per_dimension * 25.4) / max_dimension_mm)
+        
+        # Ensure DPI is reasonable (minimum 50 DPI)
+        safe_dpi = max(50, min(safe_dpi, dpi))
+        
+        # Recalculate pixel dimensions with safe DPI
+        width_px = mm_to_px(canvas_width_mm, safe_dpi)
+        height_px = mm_to_px(canvas_height_mm, safe_dpi)
+        
+        return width_px, height_px, safe_dpi
+    
+    return width_px, height_px, dpi
+
+
 def compose_raster_any_shape(
     placements: List[Placement],
     doc_registry: List[fitz.Document],
@@ -32,27 +70,32 @@ def compose_raster_any_shape(
     origin_center: bool = True,
     background: int = 255,
 ) -> Image.Image:
-    canvas_w_px = mm_to_px(canvas_width_mm, dpi)
-    canvas_h_px = mm_to_px(canvas_height_mm, dpi)
+    # Validate and potentially reduce DPI to prevent overflow
+    canvas_w_px, canvas_h_px, safe_dpi = validate_canvas_dimensions(canvas_width_mm, canvas_height_mm, dpi)
     
-    # Check for dimension overflow (PIL typically has limits around 2^31-1 pixels)
-    max_dimension = 2**30  # Conservative limit
-    if canvas_w_px > max_dimension or canvas_h_px > max_dimension:
-        raise ValueError(f"code=5: image dimensions might overflow (width={canvas_w_px}, height={canvas_h_px} pixels). Try reducing DPI or canvas size.")
+    # Warn if DPI was reduced
+    if safe_dpi < dpi:
+        print(f"Warning: DPI reduced from {dpi} to {safe_dpi} to prevent image overflow")
+        print(f"Canvas dimensions: {canvas_width_mm:.1f}mm x {canvas_height_mm:.1f}mm")
+        print(f"Pixel dimensions: {canvas_w_px:,} x {canvas_h_px:,} pixels")
     
-    base = Image.new("L", (canvas_w_px, canvas_h_px), color=background)
+    try:
+        base = Image.new("L", (canvas_w_px, canvas_h_px), color=background)
+    except Exception as e:
+        raise ValueError(f"Failed to create image with dimensions {canvas_w_px:,} x {canvas_h_px:,} pixels. "
+                        f"Try reducing DPI (current: {safe_dpi}) or canvas size. Error: {e}")
 
     cx = canvas_w_px // 2 if origin_center else 0
     cy = canvas_h_px // 2 if origin_center else 0
 
     for pl in placements:
         src_doc = doc_registry[pl.doc_index]
-        target_h_px = max(1, mm_to_px(pl.height_mm, dpi))
+        target_h_px = max(1, mm_to_px(pl.height_mm, safe_dpi))
         page_img = _render_pdf_page_to_pil(src_doc, pl.page_index, target_h_px)
         rot = page_img.rotate(-pl.rotation_deg, expand=True, fillcolor=255)
 
-        x_center_px = cx + mm_to_px(pl.center_xy_mm[0], dpi)
-        y_center_px = cy + mm_to_px(pl.center_xy_mm[1], dpi)
+        x_center_px = cx + mm_to_px(pl.center_xy_mm[0], safe_dpi)
+        y_center_px = cy + mm_to_px(pl.center_xy_mm[1], safe_dpi)
 
         x0 = int(round(x_center_px - rot.width / 2))
         y0 = int(round(y_center_px - rot.height / 2))
@@ -71,10 +114,14 @@ def compute_dpi_for_target_mb(width_mm: float, height_mm: float, target_mb: floa
     dpi = math.sqrt(numerator / denominator)
     
     # Limit DPI to prevent dimension overflow
-    max_dpi = 10000  # Conservative limit to prevent overflow
+    # Use more conservative limits based on canvas size
+    max_dimension_mm = max(width_mm, height_mm)
+    max_safe_dpi = int((2**28 * 25.4) / max_dimension_mm)  # 2^28 pixels max per dimension
+    max_dpi = min(5000, max_safe_dpi)  # Additional conservative limit
+    
     dpi = min(dpi, max_dpi)
     
-    return int(max(1, round(dpi)))
+    return int(max(50, round(dpi)))  # Minimum 50 DPI
 
 
 def save_tiff_1bit(img: Image.Image, path: str, dpi: int, compression: Optional[str] = None) -> None:
