@@ -7,7 +7,7 @@ from typing import List, Tuple
 import fitz  # PyMuPDF
 from shapely.geometry import MultiPolygon
 
-from .geometry import boolean_allowed_region, load_svg_polygons
+from .geometry import boolean_allowed_region, parse_svg_path
 from .layout import PageSpec, plan_layout_any_shape
 from .render import (
     compose_raster_any_shape,
@@ -40,10 +40,10 @@ def cli_compose(args: argparse.Namespace) -> int:
 
     docs, pages = _collect_pages(args.input)
 
-    outer: MultiPolygon = load_svg_polygons(args.outer_shape)
+    outer: MultiPolygon = parse_svg_path(args.outer_shape)
     inner_shapes: List[MultiPolygon] = []
     for p in (args.inner_shape or []):
-        inner_shapes.append(load_svg_polygons(p))
+        inner_shapes.append(parse_svg_path(p))
 
     allowed = boolean_allowed_region(outer, inner_shapes)
     if allowed.is_empty:

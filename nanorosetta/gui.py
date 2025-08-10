@@ -7,7 +7,7 @@ from typing import List
 
 import fitz  # PyMuPDF
 
-from .geometry import load_svg_polygons, boolean_allowed_region
+from .geometry import parse_svg_path, boolean_allowed_region
 from .layout import PageSpec, plan_layout_any_shape
 from .render import (
     compose_raster_any_shape,
@@ -180,8 +180,8 @@ class NanoPrintGUI(tk.Tk):
                     pages.append(PageSpec(doc_index=doc_idx, page_index=i, width_pt=r.width, height_pt=r.height))
 
             # Shapes and region
-            outer = load_svg_polygons(self.outer_shape_var.get())
-            inners = [load_svg_polygons(p) for p in self.inner_shapes]
+            outer = parse_svg_path(self.outer_shape_var.get())
+            inners = [parse_svg_path(p) for p in self.inner_shapes]
             allowed = boolean_allowed_region(outer, inners)
             if allowed.is_empty:
                 raise ValueError("Allowed region is empty. Check shapes.")

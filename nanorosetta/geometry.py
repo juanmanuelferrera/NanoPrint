@@ -1,46 +1,79 @@
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List
 
-import numpy as np
-from shapely.geometry import Polygon, MultiPolygon, LinearRing
+from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
-from svgpathtools import svg2paths
+from svgpathtools import svg2paths2
 
 
-def _path_to_polygon(path, samples_per_curve: int = 50) -> Polygon:
-    pts: List[Tuple[float, float]] = []
-    for seg in path:
-        for t in np.linspace(0, 1, samples_per_curve, endpoint=True):
-            z = seg.point(t)
-            pts.append((z.real, z.imag))
-    if len(pts) < 3:
-        return Polygon()
-    ring = LinearRing(pts)
-    if not ring.is_ccw:
-        pts = list(reversed(pts))
-    return Polygon(pts)
-
-
-def load_svg_polygons(svg_path: str) -> MultiPolygon:
-    paths, _ = svg2paths(svg_path)
-    polys: List[Polygon] = []
-    for p in paths:
-        poly = _path_to_polygon(p)
-        if not poly.is_empty and poly.is_valid:
-            polys.append(poly)
-    if not polys:
-        return MultiPolygon([])
-    merged = unary_union(polys)
-    if isinstance(merged, Polygon):
-        return MultiPolygon([merged])
-    return merged
+def parse_svg_path(svg_path: str) -> MultiPolygon:
+    """Parse SVG file and convert to Shapely MultiPolygon."""
+    paths, attributes, svg_attributes = svg2paths2(svg_path)
+    
+    polygons = []
+    for path in paths:
+        # Convert path to polygon coordinates
+        coords = []
+        for segment in path:
+            if hasattr(segment, 'start'):
+                coords.append((segment.start.real, segment.start.imag))
+            if hasattr(segment, 'end'):
+                coords.append((segment.end.real, segment.end.imag))
+        
+        if len(coords) >= 3:
+            # Close the polygon
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])
+            polygon = Polygon(coords)
+            if polygon.is_valid:
+                polygons.append(polygon)
+    
+    if not polygons:
+        raise ValueError(f"No valid polygons found in {svg_path}")
+    
+    return MultiPolygon(polygons)
 
 
 def boolean_allowed_region(outer: MultiPolygon, inners: List[MultiPolygon]) -> MultiPolygon:
-    region = unary_union(outer)
+    """Create allowed region by subtracting inner shapes from outer shape."""
+    if outer.is_empty:
+        raise ValueError("Outer shape is empty")
+    
+    # Validate that outer shape is larger than inner shapes
+    outer_bounds = outer.bounds  # (minx, miny, maxx, maxy)
+    outer_area = outer.area
+    
+    for i, inner in enumerate(inners):
+        if inner.is_empty:
+            continue
+            
+        inner_bounds = inner.bounds
+        inner_area = inner.area
+        
+        # Check if inner shape is larger than outer shape
+        if inner_area > outer_area * 0.95:  # Allow 5% tolerance
+            raise ValueError(f"Inner shape {i} is too large relative to outer shape "
+                           f"(inner area: {inner_area:.2f}, outer area: {outer_area:.2f})")
+        
+        # Check if inner shape extends beyond outer bounds
+        if (inner_bounds[0] < outer_bounds[0] or inner_bounds[1] < outer_bounds[1] or
+            inner_bounds[2] > outer_bounds[2] or inner_bounds[3] > outer_bounds[3]):
+            raise ValueError(f"Inner shape {i} extends beyond outer shape bounds")
+    
+    # Create allowed region
+    region = outer
     for inner in inners:
         region = region.difference(unary_union(inner))
+    
+    # Validate the resulting region
+    if region.is_empty:
+        raise ValueError("Allowed region is empty - inner shapes completely fill outer shape")
+    
+    if region.area < outer_area * 0.01:  # Less than 1% of original area
+        raise ValueError(f"Allowed region is too small (area: {region.area:.2f}, "
+                        f"original: {outer_area:.2f}) - insufficient space for pages")
+    
     # Normalize
     if isinstance(region, Polygon):
         return MultiPolygon([region])
