@@ -34,6 +34,12 @@ def compose_raster_any_shape(
 ) -> Image.Image:
     canvas_w_px = mm_to_px(canvas_width_mm, dpi)
     canvas_h_px = mm_to_px(canvas_height_mm, dpi)
+    
+    # Check for dimension overflow (PIL typically has limits around 2^31-1 pixels)
+    max_dimension = 2**30  # Conservative limit
+    if canvas_w_px > max_dimension or canvas_h_px > max_dimension:
+        raise ValueError(f"code=5: image dimensions might overflow (width={canvas_w_px}, height={canvas_h_px} pixels). Try reducing DPI or canvas size.")
+    
     base = Image.new("L", (canvas_w_px, canvas_h_px), color=background)
 
     cx = canvas_w_px // 2 if origin_center else 0
@@ -63,6 +69,11 @@ def compute_dpi_for_target_mb(width_mm: float, height_mm: float, target_mb: floa
     numerator = bytes_target * 8.0 / max(1, bits_per_pixel) * (25.4 ** 2)
     denominator = max(1e-6, width_mm * height_mm)
     dpi = math.sqrt(numerator / denominator)
+    
+    # Limit DPI to prevent dimension overflow
+    max_dpi = 10000  # Conservative limit to prevent overflow
+    dpi = min(dpi, max_dpi)
+    
     return int(max(1, round(dpi)))
 
 
