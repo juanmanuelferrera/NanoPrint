@@ -1,0 +1,24 @@
+User-agent: *
+Crawl-delay: 10
+Allow: /
+Disallow: /*/accounts/
+Disallow: /*/side-by-side/*
+Disallow: /*/search/synonyms/*
+Disallow: /*/paragraph-tool/*
+Disallow: /*/advanced-view/
+Disallow: /*/search/*
+
+User-agent: BLEXBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: AppEngine-Google
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
