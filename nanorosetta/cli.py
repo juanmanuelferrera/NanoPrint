@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import math
 from typing import List, Tuple
 
 import fitz  # PyMuPDF
 from shapely.geometry import MultiPolygon
 
 from .geometry import boolean_allowed_region, parse_svg_path
-from .layout import PageSpec, plan_layout_any_shape
+from .layout import PageSpec, plan_layout_any_shape, calculate_optimal_page_size
 from .render import (
     compose_raster_any_shape,
     save_pdf_proof,
