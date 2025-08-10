@@ -41,6 +41,57 @@ class Placement:
         self.rotation_deg = rotation_deg
 
 
+def calculate_safe_page_dimensions(
+    page_count: int,
+    target_dpi: int,
+    max_canvas_pixels: int = 100_000_000,  # 100M pixels max
+    min_page_height_mm: float = 1.0,
+    max_page_height_mm: float = 50.0,
+) -> float:
+    """
+    Calculate safe page dimensions for large document counts.
+    
+    Args:
+        page_count: Number of pages to layout
+        target_dpi: Target output DPI
+        max_canvas_pixels: Maximum total canvas pixels (memory constraint)
+        min_page_height_mm: Minimum page height in mm
+        max_page_height_mm: Maximum page height in mm
+    
+    Returns:
+        Safe page height in mm
+    """
+    # Estimate canvas area needed (assuming roughly square layout)
+    estimated_canvas_side_pixels = math.sqrt(max_canvas_pixels)
+    
+    # Convert to mm
+    canvas_side_mm = estimated_canvas_side_pixels / (target_dpi / 25.4)
+    
+    # Estimate how many pages can fit in this area
+    # Assume pages are roughly 1:1.4 aspect ratio (A4-like)
+    avg_aspect_ratio = 1.4
+    
+    # Calculate optimal page size to fit all pages
+    # This is a simplified calculation - in practice, layout algorithm will optimize
+    estimated_pages_per_row = math.sqrt(page_count * avg_aspect_ratio)
+    estimated_rows = page_count / estimated_pages_per_row
+    
+    if estimated_pages_per_row > 0 and estimated_rows > 0:
+        # Calculate page height that fits in the canvas
+        page_height_mm = min(
+            canvas_side_mm / estimated_rows,
+            canvas_side_mm / (estimated_pages_per_row * avg_aspect_ratio)
+        )
+    else:
+        # Fallback calculation
+        page_height_mm = math.sqrt(canvas_side_mm * canvas_side_mm / page_count / avg_aspect_ratio)
+    
+    # Constrain to reasonable bounds
+    page_height_mm = max(min_page_height_mm, min(max_page_height_mm, page_height_mm))
+    
+    return page_height_mm
+
+
 def calculate_optimal_page_size(
     allowed_region_mm: MultiPolygon,
     pages: List[PageSpec],
@@ -48,6 +99,7 @@ def calculate_optimal_page_size(
     gap_mm: float = 0.5,
     min_page_height_mm: float = 1.0,
     max_page_height_mm: float = 50.0,
+    max_canvas_pixels: int = 100_000_000,  # 100M pixels max
 ) -> float:
     """
     Calculate optimal page height to efficiently fill the available area.
@@ -59,12 +111,19 @@ def calculate_optimal_page_size(
         gap_mm: Gap between pages
         min_page_height_mm: Minimum page height in mm
         max_page_height_mm: Maximum page height in mm
+        max_canvas_pixels: Maximum total canvas pixels (memory constraint)
     
     Returns:
         Optimal page height in mm
     """
     if not pages or allowed_region_mm.is_empty:
         return min_page_height_mm
+    
+    # For large page counts, use safe calculation
+    if len(pages) > 500:
+        return calculate_safe_page_dimensions(
+            len(pages), dpi, max_canvas_pixels, min_page_height_mm, max_page_height_mm
+        )
     
     # Calculate total area available
     total_area_mm2 = allowed_region_mm.area
@@ -84,7 +143,6 @@ def calculate_optimal_page_size(
     # cols = estimated_pages_per_row
     
     # Solve for page_height:
-    # total_area = rows * page_height * (cols * page_height * aspect + gaps)
     # total_area = rows * page_height^2 * cols * aspect + rows * page_height * gaps
     
     # Simplified: assume gaps are small relative to page area
@@ -180,13 +238,14 @@ def plan_layout_any_shape(
     pages: List[PageSpec],
     allowed_region_mm: MultiPolygon,
     nominal_height_mm: float,
-    gap_mm: float,
+    gap_mm: float = 0.5,
     orientation: Orientation = "tangent",
     scale_min: float = 0.1,
     scale_max: float = 1.0,
     streamline_step_mm: float = 2.0,
     max_streamlines: int = 200,
     optimize_for_dpi: int = None,
+    max_canvas_pixels: int = 100_000_000,
 ) -> List[Placement]:
     """
     Plan page layout with optional DPI optimization.
@@ -201,7 +260,8 @@ def plan_layout_any_shape(
     # Calculate optimal page size if DPI optimization is requested
     if optimize_for_dpi is not None:
         nominal_height_mm = calculate_optimal_page_size(
-            allowed_region_mm, pages, optimize_for_dpi, gap_mm
+            allowed_region_mm, pages, optimize_for_dpi, gap_mm, 
+            min_page_height_mm=1.0, max_page_height_mm=50.0, max_canvas_pixels=max_canvas_pixels
         )
     
     # Generate inward offsets as streamlines

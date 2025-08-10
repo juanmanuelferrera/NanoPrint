@@ -67,6 +67,7 @@ class NanoPrintGUI(tk.Tk):
         self.tiff_comp_var = tk.StringVar(value="lzw")
         self.tiff_dpi_var = tk.IntVar(value=1200)
         self.optimize_dpi_var = tk.IntVar(value=0)  # 0 = disabled, >0 = DPI value
+        self.max_canvas_pixels_var = tk.IntVar(value=100_000_000)  # 100M pixels default
 
         row += 1
         ttk.Label(frm, text="Target MB").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -90,6 +91,11 @@ class NanoPrintGUI(tk.Tk):
         ttk.Label(frm, text="Optimize for DPI").grid(row=row, column=0, sticky=tk.W, **pad)
         ttk.Entry(frm, textvariable=self.optimize_dpi_var, width=10).grid(row=row, column=1, sticky=tk.W, **pad)
         ttk.Label(frm, text="(0=disabled)").grid(row=row, column=2, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Label(frm, text="Max Canvas Pixels").grid(row=row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.max_canvas_pixels_var, width=15).grid(row=row, column=1, sticky=tk.W, **pad)
+        ttk.Label(frm, text="(memory limit)").grid(row=row, column=2, sticky=tk.W, **pad)
 
         row += 1
         ttk.Label(frm, text="Orientation").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -195,6 +201,8 @@ class NanoPrintGUI(tk.Tk):
             optimize_dpi = int(self.optimize_dpi_var.get())
             optimize_dpi = optimize_dpi if optimize_dpi > 0 else None
             
+            max_canvas_pixels = int(self.max_canvas_pixels_var.get())
+            
             placements = plan_layout_any_shape(
                 pages=pages,
                 allowed_region_mm=allowed,
@@ -202,6 +210,7 @@ class NanoPrintGUI(tk.Tk):
                 gap_mm=float(self.gap_var.get()),
                 orientation=self.orientation_var.get(),
                 optimize_for_dpi=optimize_dpi,
+                max_canvas_pixels=max_canvas_pixels,
             )
             if not placements:
                 raise ValueError("No placements computed with current parameters.")
