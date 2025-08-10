@@ -42,10 +42,11 @@ python -m nanorosetta.cli compose \
 ```
 
 This will:
-1. Calculate the area difference (OD - ID)
-2. Determine optimal page sizes to fill the available space
-3. Minimize blank areas by scaling pages appropriately
-4. Maintain original page aspect ratios
+1. **Calculate page dimensions** based on the target DPI
+2. **Calculate total area needed** = page_count × page_area + gaps
+3. **Resize SVG shapes** to accommodate the required area
+4. **Place pages optimally** within the resized SVG area difference
+5. **Maintain original page aspect ratios**
 
 ### Large Document Support (New!)
 
@@ -64,8 +65,15 @@ python -m nanorosetta.cli compose \
 **Memory Management:**
 - `--max-canvas-pixels 50000000` (50M pixels) for large documents
 - `--optimize-for-dpi 200` recommended for text-heavy documents
-- Automatically scales pages to fit within memory constraints
+- **SVG shapes are automatically resized** to fit the calculated page area
 - Prevents crashes on systems with limited RAM
+
+**Flow for DPI Optimization:**
+1. **User specifies DPI** (e.g., 200 DPI)
+2. **Calculate page dimensions** based on that DPI
+3. **Calculate total area needed** = page_count × page_area + gaps
+4. **Resize SVG shapes** to accommodate the total area needed
+5. **Fit everything** within the resized SVG area difference
 
 Key options:
 - `--outer-shape PATH` SVG path for the outer constraint (supports arbitrary shapes)

@@ -92,6 +92,60 @@ def calculate_safe_page_dimensions(
     return page_height_mm
 
 
+def calculate_required_svg_scale(
+    pages: List[PageSpec],
+    page_height_mm: float,
+    gap_mm: float = 0.5,
+    margin_mm: float = 5.0,
+) -> float:
+    """
+    Calculate the scale factor needed for SVG shapes to accommodate all pages.
+    
+    Args:
+        pages: List of page specifications
+        page_height_mm: Height of each page in mm
+        gap_mm: Gap between pages in mm
+        margin_mm: Margin around the layout in mm
+    
+    Returns:
+        Scale factor to apply to SVG shapes
+    """
+    if not pages:
+        return 1.0
+    
+    # Calculate total area needed for all pages
+    total_page_area_mm2 = 0
+    for page in pages:
+        page_width_mm = page.aspect_ratio * page_height_mm
+        page_area_mm2 = page_width_mm * page_height_mm
+        total_page_area_mm2 += page_area_mm2
+    
+    # Add gap area (simplified calculation)
+    # Assume pages are arranged in a roughly square grid
+    page_count = len(pages)
+    estimated_pages_per_row = math.sqrt(page_count)
+    estimated_rows = page_count / estimated_pages_per_row
+    
+    # Calculate gap area
+    avg_page_width_mm = sum(p.aspect_ratio for p in pages) / len(pages) * page_height_mm
+    gap_area_mm2 = (estimated_pages_per_row - 1) * estimated_rows * avg_page_width_mm * gap_mm
+    gap_area_mm2 += (estimated_rows - 1) * estimated_pages_per_row * page_height_mm * gap_mm
+    
+    # Total area needed including gaps and margin
+    total_needed_area_mm2 = total_page_area_mm2 + gap_area_mm2
+    
+    # Calculate required scale factor
+    # We need to scale the SVG shapes so their area difference can accommodate this
+    # For simplicity, assume we need to scale by the square root of the area ratio
+    # This is a rough approximation - the actual layout algorithm will optimize placement
+    
+    # Estimate current SVG area (this would come from the actual SVG shapes)
+    # For now, we'll return a scale factor that the caller can apply
+    # The actual calculation should be done in the CLI where we have access to the SVG shapes
+    
+    return math.sqrt(total_needed_area_mm2 / 1000.0)  # Rough estimate, will be refined
+
+
 def calculate_optimal_page_size(
     allowed_region_mm: MultiPolygon,
     pages: List[PageSpec],

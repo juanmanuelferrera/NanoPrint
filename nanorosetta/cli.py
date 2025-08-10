@@ -31,36 +31,91 @@ def _collect_pages(input_paths: List[str]) -> Tuple[List[fitz.Document], List[Pa
 
 
 def cli_compose(args: argparse.Namespace) -> int:
-    if not args.input:
-        print("No --input PDFs provided.")
-        return 2
-    if not args.outer_shape:
-        print("--outer-shape SVG is required.")
-        return 2
-
+    """Compose PDF pages around any inner shape constrained to any outer shape."""
+    
+    # Load PDF pages
     docs, pages = _collect_pages(args.input)
-
-    outer: MultiPolygon = parse_svg_path(args.outer_shape)
-    inner_shapes: List[MultiPolygon] = []
-    for p in (args.inner_shape or []):
-        inner_shapes.append(parse_svg_path(p))
-
-    allowed = boolean_allowed_region(outer, inner_shapes)
-    if allowed.is_empty:
-        print("Allowed region is empty; check shapes.")
-        return 3
-
+    if not pages:
+        print("No pages found in input PDFs")
+        return 1
+    
+    # Load SVG shapes
+    outer = parse_svg_path(args.outer_shape)
+    inners = []
+    if args.inner_shape:
+        for inner_path in args.inner_shape:
+            inner = parse_svg_path(inner_path)
+            inners.append(inner)
+    
+    # Calculate page dimensions based on DPI optimization if requested
+    page_height_mm = args.nominal_height_mm
+    if args.optimize_for_dpi is not None:
+        # For DPI optimization, we need to calculate the required SVG scale
+        # based on the page dimensions and count
+        
+        # First, calculate what page height we need for the target DPI
+        # This is a simplified calculation - we'll refine it
+        target_dpi = args.optimize_for_dpi
+        
+        # Calculate total area needed for all pages
+        total_page_area_mm2 = 0
+        for page in pages:
+            # Estimate page width based on aspect ratio
+            page_width_mm = page.aspect_ratio * page_height_mm
+            page_area_mm2 = page_width_mm * page_height_mm
+            total_page_area_mm2 += page_area_mm2
+        
+        # Add gap area
+        page_count = len(pages)
+        estimated_pages_per_row = math.sqrt(page_count)
+        estimated_rows = page_count / estimated_pages_per_row
+        
+        avg_page_width_mm = sum(p.aspect_ratio for p in pages) / len(pages) * page_height_mm
+        gap_area_mm2 = (estimated_pages_per_row - 1) * estimated_rows * avg_page_width_mm * args.gap_mm
+        gap_area_mm2 += (estimated_rows - 1) * estimated_pages_per_row * page_height_mm * args.gap_mm
+        
+        total_needed_area_mm2 = total_page_area_mm2 + gap_area_mm2
+        
+        # Calculate current SVG area difference
+        allowed_region = boolean_allowed_region(outer, inners)
+        current_svg_area_mm2 = allowed_region.area
+        
+        # Calculate required scale factor for SVG shapes
+        if current_svg_area_mm2 > 0:
+            required_scale = math.sqrt(total_needed_area_mm2 / current_svg_area_mm2)
+        else:
+            required_scale = 1.0
+        
+        # Apply scale to SVG shapes
+        from shapely.affinity import scale
+        outer = scale(outer, required_scale, required_scale)
+        inners = [scale(inner, required_scale, required_scale) for inner in inners]
+        
+        # Recalculate allowed region with scaled shapes
+        allowed_region = boolean_allowed_region(outer, inners)
+        
+        # Now calculate optimal page size for the scaled region
+        page_height_mm = calculate_optimal_page_size(
+            allowed_region, pages, target_dpi, args.gap_mm,
+            min_page_height_mm=1.0, max_page_height_mm=50.0, max_canvas_pixels=args.max_canvas_pixels
+        )
+    
+    # Create allowed region (if not already done in DPI optimization)
+    if args.optimize_for_dpi is None:
+        allowed_region = boolean_allowed_region(outer, inners)
+    
+    # Plan layout
     placements = plan_layout_any_shape(
         pages=pages,
-        allowed_region_mm=allowed,
-        nominal_height_mm=args.nominal_height_mm,
+        allowed_region_mm=allowed_region,
+        nominal_height_mm=page_height_mm,
         gap_mm=args.gap_mm,
         orientation=args.orientation,
         scale_min=args.scale_min,
         scale_max=args.scale_max,
         streamline_step_mm=args.streamline_step_mm,
         max_streamlines=args.max_streamlines,
-        optimize_for_dpi=args.optimize_for_dpi,
+        optimize_for_dpi=None,  # Already handled above
         max_canvas_pixels=args.max_canvas_pixels,
     )
 
@@ -69,7 +124,7 @@ def cli_compose(args: argparse.Namespace) -> int:
         return 4
 
     # Canvas from outer bounds
-    minx, miny, maxx, maxy = allowed.bounds
+    minx, miny, maxx, maxy = allowed_region.bounds
     width_mm = (maxx - minx) + 2 * args.canvas_margin_mm
     height_mm = (maxy - miny) + 2 * args.canvas_margin_mm
 
