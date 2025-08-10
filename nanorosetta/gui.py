@@ -66,6 +66,7 @@ class NanoPrintGUI(tk.Tk):
         self.tiff_mode_var = tk.StringVar(value="bilevel")
         self.tiff_comp_var = tk.StringVar(value="lzw")
         self.tiff_dpi_var = tk.IntVar(value=1200)
+        self.optimize_dpi_var = tk.IntVar(value=0)  # 0 = disabled, >0 = DPI value
 
         row += 1
         ttk.Label(frm, text="Target MB").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -84,6 +85,11 @@ class NanoPrintGUI(tk.Tk):
         ttk.Entry(frm, textvariable=self.nominal_height_var, width=10).grid(row=row, column=1, sticky=tk.W, **pad)
         ttk.Label(frm, text="Gap (mm)").grid(row=row, column=2, sticky=tk.E, **pad)
         ttk.Entry(frm, textvariable=self.gap_var, width=10).grid(row=row, column=3, sticky=tk.W, **pad)
+
+        row += 1
+        ttk.Label(frm, text="Optimize for DPI").grid(row=row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.optimize_dpi_var, width=10).grid(row=row, column=1, sticky=tk.W, **pad)
+        ttk.Label(frm, text="(0=disabled)").grid(row=row, column=2, sticky=tk.W, **pad)
 
         row += 1
         ttk.Label(frm, text="Orientation").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -186,12 +192,16 @@ class NanoPrintGUI(tk.Tk):
             if allowed.is_empty:
                 raise ValueError("Allowed region is empty. Check shapes.")
 
+            optimize_dpi = int(self.optimize_dpi_var.get())
+            optimize_dpi = optimize_dpi if optimize_dpi > 0 else None
+            
             placements = plan_layout_any_shape(
                 pages=pages,
                 allowed_region_mm=allowed,
                 nominal_height_mm=float(self.nominal_height_var.get()),
                 gap_mm=float(self.gap_var.get()),
                 orientation=self.orientation_var.get(),
+                optimize_for_dpi=optimize_dpi,
             )
             if not placements:
                 raise ValueError("No placements computed with current parameters.")

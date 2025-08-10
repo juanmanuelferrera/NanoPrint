@@ -60,6 +60,7 @@ def cli_compose(args: argparse.Namespace) -> int:
         scale_max=args.scale_max,
         streamline_step_mm=args.streamline_step_mm,
         max_streamlines=args.max_streamlines,
+        optimize_for_dpi=args.optimize_for_dpi,
     )
 
     if not placements:
@@ -144,10 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--scale-max", type=float, default=1.0)
     c.add_argument("--streamline-step-mm", type=float, default=2.0, help="Offset step for streamlines (mm)")
     c.add_argument("--max-streamlines", type=int, default=200)
+    c.add_argument("--optimize-for-dpi", type=int, help="Calculate optimal page size to fill area at this DPI (overrides --nominal-height-mm)")
 
     # Canvas controls
     c.add_argument("--canvas-margin-mm", type=float, default=5.0, help="Extra margin around outer bounds (mm)")
-    c.add_argument("--canvas-bin-mm", type=float, help="Round canvas width/height up to the next multiple (mm)")
+    c.add_argument("--canvas-bin-mm", type=float, help="Round canvas dimensions to multiples of this value (mm)")
 
     c.set_defaults(func=cli_compose)
     return p
