@@ -191,6 +191,19 @@ def calculate_optimal_page_size(
     estimated_pages_per_row = math.sqrt(len(pages) * avg_aspect_ratio)
     estimated_rows = len(pages) / estimated_pages_per_row
     
+    # Calculate theoretical page capacity for this area
+    # Using a standard page size to estimate how many could fit
+    standard_page_area_mm2 = 20.0 * 20.0 * avg_aspect_ratio  # 20mm height reference
+    theoretical_capacity = int(total_area_mm2 / standard_page_area_mm2)
+    
+    # Calculate fill efficiency
+    actual_pages = len(pages)
+    fill_ratio = actual_pages / max(1, theoretical_capacity)
+    
+    logging.info(f"Layout analysis: {actual_pages} pages in {total_area_mm2:.1f}mm² area")
+    logging.info(f"Theoretical capacity: ~{theoretical_capacity} pages (20mm standard)")
+    logging.info(f"Fill efficiency: {fill_ratio:.1%} ({actual_pages}/{theoretical_capacity})")
+    
     # Calculate optimal page height to fill the area
     # Area = rows * page_height * (cols * page_width + gaps)
     # page_width = page_height * avg_aspect_ratio
@@ -313,10 +326,26 @@ def plan_layout_any_shape(
     
     # Calculate optimal page size if DPI optimization is requested
     if optimize_for_dpi is not None:
-        nominal_height_mm = calculate_optimal_page_size(
-            allowed_region_mm, pages, optimize_for_dpi, gap_mm, 
-            min_page_height_mm=1.0, max_page_height_mm=50.0, max_canvas_pixels=max_canvas_pixels
-        )
+        # For single pages, use a more conservative approach to avoid excessive scaling
+        if len(pages) == 1:
+            logging.info(f"Single page detected - using conservative sizing instead of region-filling optimization")
+            # Calculate reasonable size based on page aspect ratio and target DPI
+            page = pages[0]
+            aspect_ratio = page.width_pt / page.height_pt if page.height_pt > 0 else 1.0
+            
+            # Use a reasonable height (e.g., 10mm for small pages, up to 25mm for larger ones)
+            # This prevents single pages from being scaled to fill the entire region
+            base_height_mm = min(25.0, max(10.0, nominal_height_mm))
+            nominal_height_mm = base_height_mm
+            logging.info(f"Single page sized at {nominal_height_mm:.1f}mm height (aspect ratio: {aspect_ratio:.2f})")
+        else:
+            # Use full optimization for multiple pages
+            logging.info(f"Multiple pages ({len(pages)}) detected - using region-filling optimization")
+            nominal_height_mm = calculate_optimal_page_size(
+                allowed_region_mm, pages, optimize_for_dpi, gap_mm, 
+                min_page_height_mm=1.0, max_page_height_mm=50.0, max_canvas_pixels=max_canvas_pixels
+            )
+            logging.info(f"Optimized page height: {nominal_height_mm:.1f}mm")
     
     # Generate inward offsets as streamlines
     offsets = [i * streamline_step_mm for i in range(max_streamlines)]

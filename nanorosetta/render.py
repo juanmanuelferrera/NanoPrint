@@ -13,15 +13,42 @@ from .layout import Placement
 
 
 def _render_pdf_page_to_pil(src_doc: fitz.Document, page_index: int, target_height_px: int) -> Image.Image:
+    """
+    Render PDF page to PIL Image by sampling at 200 DPI then scaling up.
+    This prevents memory issues when target dimensions are very large.
+    """
     page = src_doc.load_page(page_index)
     h_pt = page.rect.height
+    w_pt = page.rect.width
     if h_pt <= 0:
         h_pt = 1.0
-    scale = max(1e-6, target_height_px / h_pt)
-    mat = fitz.Matrix(scale, scale)
+    if w_pt <= 0:
+        w_pt = 1.0
+    
+    # Sample at 200 DPI to avoid memory issues with high DPI
+    sample_dpi = 200
+    sample_scale = sample_dpi / 72.0  # PyMuPDF uses 72 DPI as base
+    
+    logging.debug(f"Rendering page {page_index}: {w_pt:.1f}x{h_pt:.1f}pt at {sample_dpi} DPI")
+    
+    # Create pixmap at sample resolution
+    mat = fitz.Matrix(sample_scale, sample_scale)
     pm = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY, alpha=False)
-    img = Image.frombytes("L", (pm.width, pm.height), pm.samples)
-    return img
+    sampled_img = Image.frombytes("L", (pm.width, pm.height), pm.samples)
+    
+    logging.debug(f"Sampled image size: {sampled_img.width}x{sampled_img.height} pixels")
+    
+    # Calculate target width maintaining aspect ratio
+    target_width_px = int((target_height_px * w_pt) / h_pt)
+    
+    logging.debug(f"Scaling to target size: {target_width_px}x{target_height_px} pixels")
+    
+    # Scale up to target dimensions using high-quality resampling
+    if target_width_px != sampled_img.width or target_height_px != sampled_img.height:
+        scaled_img = sampled_img.resize((target_width_px, target_height_px), Image.LANCZOS)
+        return scaled_img
+    else:
+        return sampled_img
 
 
 def validate_canvas_dimensions(canvas_width_mm: float, canvas_height_mm: float, dpi: int) -> tuple[int, int, int]:
