@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import os
 import math
+import logging
+import sys
 from typing import List, Tuple
 
 import fitz  # PyMuPDF
@@ -16,7 +18,37 @@ from .render import (
     save_tiff_1bit,
     save_tiff_gray,
     compute_dpi_for_target_mb,
+    validate_canvas_dimensions,
 )
+
+
+def _setup_logging() -> None:
+    """Setup logging to both file and console."""
+    log_file = "nanorosetta_debug.log"
+    
+    # Create logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    
+    # Clear existing handlers
+    logger.handlers.clear()
+    
+    # File handler - detailed logs
+    file_handler = logging.FileHandler(log_file, mode='w')
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s')
+    file_handler.setFormatter(file_formatter)
+    
+    # Console handler - important messages only
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+    console_handler.setFormatter(console_formatter)
+    
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logging.info(f"Logging initialized. Debug log: {log_file}")
 
 
 def _collect_pages(input_paths: List[str]) -> Tuple[List[fitz.Document], List[PageSpec]]:
@@ -47,27 +79,47 @@ def cli_diagnose(args: argparse.Namespace) -> int:
 def cli_compose(args: argparse.Namespace) -> int:
     """Compose PDF pages around any inner shape constrained to any outer shape."""
     
+    logging.info("Starting compose operation")
+    logging.debug(f"Args: {vars(args)}")
+    
     # Load PDF pages
     try:
+        logging.info(f"Loading PDF pages from: {args.input}")
         docs, pages = _collect_pages(args.input)
+        logging.info(f"Loaded {len(pages)} pages from {len(docs)} documents")
     except Exception as e:
+        logging.error(f"Error opening input PDF(s): {e}")
         print(f"Error opening input PDF(s): {e}")
         return 5
     if not pages:
+        logging.error("No pages found in input PDFs")
         print("No pages found in input PDFs")
         return 1
     
     # Load SVG shapes
-    outer = parse_svg_path(args.outer_shape)
-    inners = []
-    if args.inner_shape:
-        for inner_path in args.inner_shape:
-            inner = parse_svg_path(inner_path)
-            inners.append(inner)
+    try:
+        logging.info(f"Parsing outer shape: {args.outer_shape}")
+        outer = parse_svg_path(args.outer_shape)
+        logging.debug(f"Outer shape bounds: {outer.bounds}")
+        
+        inners = []
+        if args.inner_shape:
+            logging.info(f"Parsing {len(args.inner_shape)} inner shape(s)")
+            for inner_path in args.inner_shape:
+                inner = parse_svg_path(inner_path)
+                inners.append(inner)
+                logging.debug(f"Inner shape bounds: {inner.bounds}")
+    except Exception as e:
+        logging.error(f"Error parsing SVG shapes: {e}")
+        print(f"Error parsing SVG shapes: {e}")
+        return 5
     
     # Calculate page dimensions based on DPI optimization if requested
     page_height_mm = args.nominal_height_mm
+    logging.info(f"Initial page height: {page_height_mm}mm")
+    
     if args.optimize_for_dpi is not None:
+        logging.info(f"DPI optimization requested for target DPI: {args.optimize_for_dpi}")
         # For DPI optimization, we need to calculate the required SVG scale
         # based on the page dimensions and count
         
@@ -95,14 +147,19 @@ def cli_compose(args: argparse.Namespace) -> int:
         total_needed_area_mm2 = total_page_area_mm2 + gap_area_mm2
         
         # Calculate current SVG area difference
+        logging.debug("Calculating boolean allowed region from shapes")
         allowed_region = boolean_allowed_region(outer, inners)
         current_svg_area_mm2 = allowed_region.area
+        logging.info(f"Current SVG area: {current_svg_area_mm2:.2f} mm²")
+        logging.info(f"Total needed area: {total_needed_area_mm2:.2f} mm²")
         
         # Calculate required scale factor for SVG shapes
         if current_svg_area_mm2 > 0:
             required_scale = math.sqrt(total_needed_area_mm2 / current_svg_area_mm2)
+            logging.info(f"Required scale factor: {required_scale:.4f}")
         else:
             required_scale = 1.0
+            logging.warning("Current SVG area is 0, using scale factor 1.0")
         
         # Apply scale to SVG shapes
         from shapely.affinity import scale
@@ -123,21 +180,32 @@ def cli_compose(args: argparse.Namespace) -> int:
         allowed_region = boolean_allowed_region(outer, inners)
     
     # Plan layout
-    placements = plan_layout_any_shape(
-        pages=pages,
-        allowed_region_mm=allowed_region,
-        nominal_height_mm=page_height_mm,
-        gap_mm=args.gap_mm,
-        orientation=args.orientation,
-        scale_min=args.scale_min,
-        scale_max=args.scale_max,
-        streamline_step_mm=args.streamline_step_mm,
-        max_streamlines=args.max_streamlines,
-        optimize_for_dpi=None,  # Already handled above
-        max_canvas_pixels=args.max_canvas_pixels,
-    )
+    try:
+        logging.info("Planning layout with current parameters")
+        logging.debug(f"Layout params - height: {page_height_mm}mm, gap: {args.gap_mm}mm, orientation: {args.orientation}")
+        
+        placements = plan_layout_any_shape(
+            pages=pages,
+            allowed_region_mm=allowed_region,
+            nominal_height_mm=page_height_mm,
+            gap_mm=args.gap_mm,
+            orientation=args.orientation,
+            scale_min=args.scale_min,
+            scale_max=args.scale_max,
+            streamline_step_mm=args.streamline_step_mm,
+            max_streamlines=args.max_streamlines,
+            optimize_for_dpi=None,  # Already handled above
+            max_canvas_pixels=args.max_canvas_pixels,
+        )
+        
+        logging.info(f"Generated {len(placements)} placements")
+    except Exception as e:
+        logging.error(f"Error during layout planning: {e}")
+        print(f"Error during layout planning: {e}")
+        return 4
 
     if not placements:
+        logging.error("No placements computed with current parameters")
         print("No placements computed with current parameters.")
         return 4
 
@@ -145,6 +213,7 @@ def cli_compose(args: argparse.Namespace) -> int:
     minx, miny, maxx, maxy = allowed_region.bounds
     width_mm = (maxx - minx) + 2 * args.canvas_margin_mm
     height_mm = (maxy - miny) + 2 * args.canvas_margin_mm
+    logging.info(f"Canvas dimensions before rounding: {width_mm:.2f} x {height_mm:.2f} mm")
 
     # Optional rounding to bin
     if args.canvas_bin_mm and args.canvas_bin_mm > 0:
@@ -153,6 +222,7 @@ def cli_compose(args: argparse.Namespace) -> int:
             return (n + (0 if abs(n * b - v) < 1e-9 else 1)) * b
         width_mm = round_up(width_mm, args.canvas_bin_mm)
         height_mm = round_up(height_mm, args.canvas_bin_mm)
+        logging.info(f"Canvas dimensions after rounding to {args.canvas_bin_mm}mm: {width_mm:.2f} x {height_mm:.2f} mm")
 
     # Recenter
     cx = (minx + maxx) / 2.0
@@ -162,18 +232,31 @@ def cli_compose(args: argparse.Namespace) -> int:
         pl.center_xy_mm = (x - cx, y - cy)
 
     dpi = args.tiff_dpi
+    logging.info(f"Initial DPI: {dpi}")
+    
     if args.target_mb:
         bpp = 1 if args.tiff_mode == "bilevel" else 8
         dpi = compute_dpi_for_target_mb(width_mm, height_mm, args.target_mb, bits_per_pixel=bpp)
+        logging.info(f"DPI adjusted for target {args.target_mb}MB: {dpi}")
 
-    raster = compose_raster_any_shape(
-        placements=placements,
-        doc_registry=docs,
-        dpi=dpi,
-        canvas_width_mm=width_mm,
-        canvas_height_mm=height_mm,
-        origin_center=True,
-    )
+    try:
+        logging.info("Starting raster composition")
+        logging.debug(f"Composition params - DPI: {dpi}, canvas: {width_mm:.2f}x{height_mm:.2f}mm")
+        
+        raster = compose_raster_any_shape(
+            placements=placements,
+            doc_registry=docs,
+            dpi=dpi,
+            canvas_width_mm=width_mm,
+            canvas_height_mm=height_mm,
+            origin_center=True,
+        )
+        
+        logging.info(f"Raster composition complete. Image size: {raster.width}x{raster.height} pixels")
+    except Exception as e:
+        logging.error(f"Error during raster composition: {e}")
+        print(f"Error during raster composition: {e}")
+        return 5
 
     if args.output:
         os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
@@ -182,15 +265,25 @@ def cli_compose(args: argparse.Namespace) -> int:
 
     if args.export_tiff:
         os.makedirs(os.path.dirname(args.export_tiff) or ".", exist_ok=True)
+        
+        # Pre-validate dimensions to provide better error messages
+        canvas_w_px, canvas_h_px, safe_dpi = validate_canvas_dimensions(width_mm, height_mm, dpi)
+        if safe_dpi < dpi:
+            print(f"Info: DPI automatically reduced from {dpi} to {safe_dpi} to prevent image overflow")
+            print(f"Canvas dimensions: {width_mm:.1f}mm x {height_mm:.1f}mm")
+            if args.optimize_for_dpi is None:
+                print("Tip: Use --optimize-for-dpi to auto-scale SVG shapes for your target DPI")
+        
         try:
             if args.tiff_mode == "bilevel":
-                save_tiff_1bit(raster, args.export_tiff, dpi, compression=args.tiff_compression)
+                save_tiff_1bit(raster, args.export_tiff, safe_dpi, compression=args.tiff_compression)
             else:
-                save_tiff_gray(raster, args.export_tiff, dpi, compression=args.tiff_compression)
+                save_tiff_gray(raster, args.export_tiff, safe_dpi, compression=args.tiff_compression)
             print(f"Wrote TIFF: {args.export_tiff}")
         except Exception as e:
             print(f"Error saving TIFF: {e}")
             print("Suggestions:")
+            print("  - Use --optimize-for-dpi <target_dpi> to auto-scale SVG shapes and prevent overflow")
             print("  - Reduce DPI (use --tiff-dpi with a lower value)")
             print("  - Use --target-mb to automatically calculate safe DPI")
             print("  - Reduce canvas size or number of pages")
@@ -245,12 +338,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: List[str] | None = None) -> int:
+    # Setup logging first
+    _setup_logging()
+    
     parser = build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
         parser.print_help()
         return 1
-    return args.func(args)
+    
+    try:
+        result = args.func(args)
+        logging.info(f"Operation completed with exit code: {result}")
+        return result
+    except Exception as e:
+        logging.error(f"Unhandled exception: {e}", exc_info=True)
+        print(f"Fatal error: {e}")
+        return 1
 
 
 if __name__ == "__main__":

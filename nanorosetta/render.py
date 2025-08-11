@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import math
 from typing import List, Optional
 
@@ -35,6 +36,8 @@ def validate_canvas_dimensions(canvas_width_mm: float, canvas_height_mm: float, 
     Returns:
         Tuple of (safe_width_px, safe_height_px, safe_dpi)
     """
+    logging.debug(f"Validating canvas dimensions: {canvas_width_mm:.2f}x{canvas_height_mm:.2f}mm at {dpi} DPI")
+    
     # PIL's maximum image dimensions (varies by system, but typically 2^31-1)
     # Use a conservative limit of 2^28 (268,435,456 pixels) to be safe
     max_pixels_per_dimension = 2**28
@@ -42,22 +45,28 @@ def validate_canvas_dimensions(canvas_width_mm: float, canvas_height_mm: float, 
     # Calculate pixel dimensions
     width_px = mm_to_px(canvas_width_mm, dpi)
     height_px = mm_to_px(canvas_height_mm, dpi)
+    logging.debug(f"Calculated pixel dimensions: {width_px}x{height_px} pixels")
     
     # Check if dimensions are too large
     if width_px > max_pixels_per_dimension or height_px > max_pixels_per_dimension:
+        logging.warning(f"Dimensions exceed safe limit ({max_pixels_per_dimension} pixels per dimension)")
+        
         # Calculate required DPI reduction
         max_dimension_mm = max(canvas_width_mm, canvas_height_mm)
         safe_dpi = int((max_pixels_per_dimension * 25.4) / max_dimension_mm)
         
         # Ensure DPI is reasonable (minimum 50 DPI)
         safe_dpi = max(50, min(safe_dpi, dpi))
+        logging.info(f"DPI reduced from {dpi} to {safe_dpi} for safety")
         
         # Recalculate pixel dimensions with safe DPI
         width_px = mm_to_px(canvas_width_mm, safe_dpi)
         height_px = mm_to_px(canvas_height_mm, safe_dpi)
+        logging.debug(f"Safe pixel dimensions: {width_px}x{height_px} pixels")
         
         return width_px, height_px, safe_dpi
     
+    logging.debug("Canvas dimensions are within safe limits")
     return width_px, height_px, dpi
 
 
@@ -70,11 +79,15 @@ def compose_raster_any_shape(
     origin_center: bool = True,
     background: int = 255,
 ) -> Image.Image:
+    logging.info(f"Starting raster composition with {len(placements)} placements")
+    logging.debug(f"Canvas: {canvas_width_mm:.2f}x{canvas_height_mm:.2f}mm, target DPI: {dpi}")
+    
     # Validate and potentially reduce DPI to prevent overflow
     canvas_w_px, canvas_h_px, safe_dpi = validate_canvas_dimensions(canvas_width_mm, canvas_height_mm, dpi)
     
     # Warn if DPI was reduced
     if safe_dpi < dpi:
+        logging.warning(f"DPI reduced from {dpi} to {safe_dpi} to prevent image overflow")
         print(f"Warning: DPI reduced from {dpi} to {safe_dpi} to prevent image overflow")
         print(f"Canvas dimensions: {canvas_width_mm:.1f}mm x {canvas_height_mm:.1f}mm")
         print(f"Pixel dimensions: {canvas_w_px:,} x {canvas_h_px:,} pixels")
