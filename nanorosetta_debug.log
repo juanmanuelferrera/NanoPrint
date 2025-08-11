@@ -1,0 +1,5 @@
+2025-08-11 16:28:17,736 - INFO - test_logging_simple:35 - Logging initialized. Debug log: nanorosetta_debug.log
+2025-08-11 16:28:17,744 - INFO - test_logging_simple:44 - This is an info message
+2025-08-11 16:28:17,744 - DEBUG - test_logging_simple:45 - This is a debug message
+2025-08-11 16:28:17,745 - WARNING - test_logging_simple:46 - This is a warning message
+2025-08-11 16:28:17,745 - ERROR - test_logging_simple:47 - This is an error message
