@@ -232,6 +232,7 @@ class NanoPrintGUI(tk.Tk):
         try:
             self.progress.config(text="Running...")
             self.log.delete("1.0", tk.END)
+            self.logger.debug("Starting GUI processing")
 
             if not self.input_pdfs:
                 raise ValueError("Please add at least one input PDF.")
@@ -251,9 +252,12 @@ class NanoPrintGUI(tk.Tk):
                     pages.append(PageSpec(doc_index=doc_idx, page_index=i, width_pt=r.width, height_pt=r.height))
 
             # Shapes and region
+            self.logger.debug(f"Parsing outer SVG: {self.outer_shape_var.get()}")
             outer = parse_svg_path(self.outer_shape_var.get())
+            self.logger.debug(f"Parsing {len(self.inner_shapes)} inner SVGs")
             inners = [parse_svg_path(p) for p in self.inner_shapes]
             allowed = boolean_allowed_region(outer, inners)
+            self.logger.debug(f"Allowed region bounds: {allowed.bounds}")
             if allowed.is_empty:
                 raise ValueError("Allowed region is empty. Check shapes.")
 
@@ -278,6 +282,7 @@ class NanoPrintGUI(tk.Tk):
             minx, miny, maxx, maxy = allowed.bounds
             width_mm = (maxx - minx) + 2 * float(self.canvas_margin_var.get())
             height_mm = (maxy - miny) + 2 * float(self.canvas_margin_var.get())
+            self.logger.debug(f"Canvas dimensions before binning: {width_mm:.2f}x{height_mm:.2f}mm")
 
             bin_mm = float(self.canvas_bin_var.get())
             if bin_mm > 0:
@@ -298,19 +303,28 @@ class NanoPrintGUI(tk.Tk):
             target_mb = float(self.target_mb_var.get()) if self.target_mb_var.get() else 0.0
             tiff_mode = self.tiff_mode_var.get()
             dpi = int(self.tiff_dpi_var.get())
+            self.logger.debug(f"Initial DPI: {dpi}, Target MB: {target_mb}, Mode: {tiff_mode}")
             if target_mb and target_mb > 0:
                 bpp = 1 if tiff_mode == "bilevel" else 8
                 dpi = compute_dpi_for_target_mb(width_mm, height_mm, target_mb, bits_per_pixel=bpp)
+                self.logger.debug(f"Calculated DPI from target MB: {dpi}")
 
             # Render
-            raster = compose_raster_any_shape(
-                placements=placements,
-                doc_registry=docs,
-                dpi=dpi,
-                canvas_width_mm=width_mm,
-                canvas_height_mm=height_mm,
-                origin_center=True,
-            )
+            self.logger.info(f"Starting render: {width_mm:.2f}x{height_mm:.2f}mm at {dpi} DPI")
+            self.logger.debug(f"Number of placements: {len(placements)}")
+            try:
+                raster = compose_raster_any_shape(
+                    placements=placements,
+                    doc_registry=docs,
+                    dpi=dpi,
+                    canvas_width_mm=width_mm,
+                    canvas_height_mm=height_mm,
+                    origin_center=True,
+                )
+                self.logger.debug(f"Render successful, raster size: {raster.size}")
+            except Exception as render_error:
+                self.logger.error(f"Render failed: {type(render_error).__name__}: {render_error}")
+                raise
 
             # Save outputs
             if self.output_pdf_var.get():
@@ -340,8 +354,26 @@ class NanoPrintGUI(tk.Tk):
             messagebox.showinfo("NanoPrint", "Finished")
         except Exception as e:
             self.progress.config(text="Error")
-            messagebox.showerror("NanoPrint", str(e))
-            self._log(f"Error: {e}\n")
+            error_msg = str(e)
+            
+            # Log full exception details
+            self.logger.error(f"Processing failed: {type(e).__name__}: {error_msg}")
+            self.logger.debug("Full exception details:", exc_info=True)
+            
+            # Check if this is the "code=5" error
+            if "code=5" in error_msg:
+                self.logger.error("Error code 5 detected - image dimensions overflow")
+                # Extract dimensions from error if possible
+                import re
+                dims_match = re.search(r'width=(\d+), height=(\d+)', error_msg)
+                if dims_match:
+                    width_px = int(dims_match.group(1))
+                    height_px = int(dims_match.group(2))
+                    self.logger.error(f"Attempted dimensions: {width_px}x{height_px} pixels")
+                    self.logger.error(f"Total pixels: {width_px * height_px:,}")
+            
+            messagebox.showerror("NanoPrint", error_msg)
+            self._log(f"Error: {error_msg}\n")
 
     def _log(self, msg: str) -> None:
         # Write to GUI text widget

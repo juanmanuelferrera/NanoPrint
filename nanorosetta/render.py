@@ -81,9 +81,12 @@ def compose_raster_any_shape(
 ) -> Image.Image:
     logging.info(f"Starting raster composition with {len(placements)} placements")
     logging.debug(f"Canvas: {canvas_width_mm:.2f}x{canvas_height_mm:.2f}mm, target DPI: {dpi}")
+    logging.debug(f"Origin center: {origin_center}, background: {background}")
     
     # Validate and potentially reduce DPI to prevent overflow
+    logging.debug("Calling validate_canvas_dimensions")
     canvas_w_px, canvas_h_px, safe_dpi = validate_canvas_dimensions(canvas_width_mm, canvas_height_mm, dpi)
+    logging.debug(f"Validation result: {canvas_w_px}x{canvas_h_px}px at {safe_dpi} DPI")
     
     # Warn if DPI was reduced
     if safe_dpi < dpi:
@@ -93,17 +96,26 @@ def compose_raster_any_shape(
         print(f"Pixel dimensions: {canvas_w_px:,} x {canvas_h_px:,} pixels")
     
     try:
+        logging.debug(f"Creating PIL Image: {canvas_w_px}x{canvas_h_px} pixels, mode='L', background={background}")
         base = Image.new("L", (canvas_w_px, canvas_h_px), color=background)
+        logging.debug("PIL Image created successfully")
     except Exception as e:
+        logging.error(f"PIL Image creation failed: {type(e).__name__}: {e}")
+        logging.error(f"Attempted dimensions: {canvas_w_px:,} x {canvas_h_px:,} pixels")
+        logging.error(f"Total pixels: {canvas_w_px * canvas_h_px:,}")
+        logging.error(f"Memory estimate: ~{(canvas_w_px * canvas_h_px) / (1024*1024):.1f} MB")
         raise ValueError(f"Failed to create image with dimensions {canvas_w_px:,} x {canvas_h_px:,} pixels. "
                         f"Try reducing DPI (current: {safe_dpi}) or canvas size. Error: {e}")
 
     cx = canvas_w_px // 2 if origin_center else 0
     cy = canvas_h_px // 2 if origin_center else 0
 
-    for pl in placements:
+    logging.debug(f"Processing {len(placements)} placements")
+    for idx, pl in enumerate(placements):
+        logging.debug(f"Processing placement {idx+1}/{len(placements)}: doc_index={pl.doc_index}, page={pl.page_index}")
         src_doc = doc_registry[pl.doc_index]
         target_h_px = max(1, mm_to_px(pl.height_mm, safe_dpi))
+        logging.debug(f"Target height: {pl.height_mm:.2f}mm = {target_h_px}px")
         page_img = _render_pdf_page_to_pil(src_doc, pl.page_index, target_h_px)
         rot = page_img.rotate(-pl.rotation_deg, expand=True, fillcolor=255)
 
