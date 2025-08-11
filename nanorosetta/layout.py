@@ -191,18 +191,12 @@ def calculate_optimal_page_size(
     estimated_pages_per_row = math.sqrt(len(pages) * avg_aspect_ratio)
     estimated_rows = len(pages) / estimated_pages_per_row
     
-    # Calculate theoretical page capacity for this area
-    # Using a standard page size to estimate how many could fit
-    standard_page_area_mm2 = 20.0 * 20.0 * avg_aspect_ratio  # 20mm height reference
-    theoretical_capacity = int(total_area_mm2 / standard_page_area_mm2)
+    # Calculate how big pages would be if we used ALL available area (perfect packing)
+    total_aspect_area = sum(p.aspect_ratio for p in pages)
+    perfect_packing_height = math.sqrt(total_area_mm2 / total_aspect_area)
     
-    # Calculate fill efficiency
-    actual_pages = len(pages)
-    fill_ratio = actual_pages / max(1, theoretical_capacity)
-    
-    logging.info(f"Layout analysis: {actual_pages} pages in {total_area_mm2:.1f}mm² area")
-    logging.info(f"Theoretical capacity: ~{theoretical_capacity} pages (20mm standard)")
-    logging.info(f"Fill efficiency: {fill_ratio:.1%} ({actual_pages}/{theoretical_capacity})")
+    logging.info(f"Packing analysis: {actual_pages} pages in {total_area_mm2:.1f}mm² available area")
+    logging.info(f"Perfect packing would use {perfect_packing_height:.1f}mm page height")
     
     # Calculate optimal page height to fill the area
     # Area = rows * page_height * (cols * page_width + gaps)
@@ -223,6 +217,15 @@ def calculate_optimal_page_size(
     
     # Constrain to reasonable bounds
     optimal_height = max(min_page_height_mm, min(max_page_height_mm, optimal_height))
+    
+    # Calculate actual packing efficiency with the constrained height
+    actual_total_area = total_aspect_area * optimal_height**2
+    packing_efficiency = actual_total_area / total_area_mm2
+    
+    logging.info(f"Selected page height: {optimal_height:.1f}mm")
+    logging.info(f"Packing efficiency: {packing_efficiency:.1%} of available area")
+    if optimal_height != perfect_packing_height:
+        logging.info(f"Height constrained from {perfect_packing_height:.1f}mm to {optimal_height:.1f}mm")
     
     return optimal_height
 
