@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -23,6 +24,7 @@ class NanoPrintGUI(tk.Tk):
         super().__init__()
         self.title("NanoPrint")
         self.geometry("720x560")
+        self.logger = logging.getLogger(__name__)
         self._build_widgets()
 
     def _build_widgets(self) -> None:
@@ -342,8 +344,14 @@ class NanoPrintGUI(tk.Tk):
             self._log(f"Error: {e}\n")
 
     def _log(self, msg: str) -> None:
+        # Write to GUI text widget
         self.log.insert(tk.END, msg)
         self.log.see(tk.END)
+        
+        # Also write to Python logger (strip trailing newline if present)
+        msg_stripped = msg.rstrip('\n')
+        if msg_stripped:
+            self.logger.info(msg_stripped)
 
 
 def run_gui() -> None:
