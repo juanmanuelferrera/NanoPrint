@@ -25,15 +25,12 @@ jobs:
 
       - name: Build Windows EXE
         run: |
-          pyinstaller --windowed --onefile --name NanoPrint \
-            --collect-all numpy --collect-all shapely --collect-all PIL --collect-all pymupdf \
-            nanoprint.py
+          pyinstaller --windowed --onefile --name NanoPrint --collect-all numpy --collect-all shapely --collect-all PIL --collect-all pymupdf nanoprint.py
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: NanoPrint-windows
-          path: |
-            dist/NanoPrint.exe
+          path: dist/NanoPrint.exe
           if-no-files-found: error
 
