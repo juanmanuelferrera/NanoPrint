@@ -48,7 +48,11 @@ def cli_compose(args: argparse.Namespace) -> int:
     """Compose PDF pages around any inner shape constrained to any outer shape."""
     
     # Load PDF pages
-    docs, pages = _collect_pages(args.input)
+    try:
+        docs, pages = _collect_pages(args.input)
+    except Exception as e:
+        print(f"Error opening input PDF(s): {e}")
+        return 5
     if not pages:
         print("No pages found in input PDFs")
         return 1
@@ -190,7 +194,7 @@ def cli_compose(args: argparse.Namespace) -> int:
             print("  - Reduce DPI (use --tiff-dpi with a lower value)")
             print("  - Use --target-mb to automatically calculate safe DPI")
             print("  - Reduce canvas size or number of pages")
-            raise
+            return 5
 
     for d in docs:
         d.close()

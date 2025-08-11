@@ -1,3 +1,15 @@
+.venv/
+dist/
+build/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+*.spec
+*.pyc
+*.pyo
+.DS_Store
+test_output/
+examples/sample_real.pdf
 build/
 dist/
 *.spec

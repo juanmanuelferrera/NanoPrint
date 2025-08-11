@@ -1,2 +1,45 @@
-# This is a placeholder for a sample PDF file
-# In a real scenario, this would be an actual PDF with pages to layout
+%PDF-1.7
+%ÂµÂ¶
+
+1 0 obj
+<</Type/Catalog/Pages 2 0 R>>
+endobj
+
+2 0 obj
+<</Type/Pages/Count 1/Kids[4 0 R]>>
+endobj
+
+3 0 obj
+<</Font<</helv 5 0 R>>>>
+endobj
+
+4 0 obj
+<</Type/Page/MediaBox[0 0 595 842]/Rotate 0/Resources 3 0 R/Parent 2 0 R/Contents[6 0 R]>>
+endobj
+
+5 0 obj
+<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>
+endobj
+
+6 0 obj
+<</Length 98/Filter/FlateDecode>>
+stream
+xÚÉ!Ã@QîSø±û›T•BÂ*™UAÉ®Z’ów5èiè¢W‘²Œ”Ó8S¸~4í{³*WçÏ#f(ì“w‡	€fâmÜ†6<#ÒÓ¡Ï­VZŠŞô]yš
+endstream
+endobj
+
+xref
+0 7
+0000000000 65535 f 
+0000000016 00000 n 
+0000000062 00000 n 
+0000000114 00000 n 
+0000000155 00000 n 
+0000000262 00000 n 
+0000000351 00000 n 
+
+trailer
+<</Size 7/Root 1 0 R/ID[<C29C56C3A817C39EC3A827C294C2A80A><3197261BE02F67E3A853789AB15F8944>]>>
+startxref
+517
+%%EOF
