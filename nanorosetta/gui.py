@@ -278,10 +278,48 @@ class NanoPrintGUI(tk.Tk):
             if not placements:
                 raise ValueError("No placements computed with current parameters.")
 
-            # Canvas from bounds + margin
+            # Scale SVG coordinates to reasonable physical dimensions
             minx, miny, maxx, maxy = allowed.bounds
-            width_mm = (maxx - minx) + 2 * float(self.canvas_margin_var.get())
-            height_mm = (maxy - miny) + 2 * float(self.canvas_margin_var.get())
+            svg_width = maxx - minx
+            svg_height = maxy - miny
+            
+            # For small page counts, use content-based sizing instead of raw SVG bounds
+            if len(placements) <= 5:  # Small layouts
+                # Calculate actual content bounds from placements
+                if placements:
+                    content_minx = min(pl.center_xy_mm[0] - pl.width_mm/2 for pl in placements)
+                    content_maxx = max(pl.center_xy_mm[0] + pl.width_mm/2 for pl in placements)
+                    content_miny = min(pl.center_xy_mm[1] - pl.height_mm/2 for pl in placements)
+                    content_maxy = max(pl.center_xy_mm[1] + pl.height_mm/2 for pl in placements)
+                    
+                    content_width = content_maxx - content_minx
+                    content_height = content_maxy - content_miny
+                    
+                    # Use content size + reasonable margin instead of full SVG bounds
+                    margin = float(self.canvas_margin_var.get())
+                    width_mm = content_width + 2 * margin
+                    height_mm = content_height + 2 * margin
+                    
+                    self.logger.info(f"Content-based canvas: {width_mm:.1f}x{height_mm:.1f}mm (content: {content_width:.1f}x{content_height:.1f}mm)")
+                else:
+                    # Fallback for no placements
+                    width_mm = 50.0  # Default small canvas
+                    height_mm = 50.0
+            else:
+                # For larger layouts, scale SVG coordinates to reasonable size
+                # Target maximum ~100mm for large dimension
+                max_target_mm = 100.0
+                scale_factor = min(max_target_mm / max(svg_width, svg_height), 1.0)
+                
+                if scale_factor < 1.0:
+                    self.logger.info(f"Scaling SVG coordinates by {scale_factor:.3f} (from {svg_width:.1f}x{svg_height:.1f} to reasonable size)")
+                    width_mm = svg_width * scale_factor + 2 * float(self.canvas_margin_var.get())
+                    height_mm = svg_height * scale_factor + 2 * float(self.canvas_margin_var.get())
+                else:
+                    # SVG coordinates are already reasonable
+                    width_mm = svg_width + 2 * float(self.canvas_margin_var.get())
+                    height_mm = svg_height + 2 * float(self.canvas_margin_var.get())
+            
             self.logger.debug(f"Canvas dimensions before binning: {width_mm:.2f}x{height_mm:.2f}mm")
 
             bin_mm = float(self.canvas_bin_var.get())

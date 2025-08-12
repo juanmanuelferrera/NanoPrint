@@ -206,6 +206,16 @@ def save_pdf_proof(img: Image.Image, path: str, width_mm: float, height_mm: floa
     doc = fitz.open()
     page = doc.new_page(width=width_pt, height=height_pt)
 
+    # Downsample large images for PDF proof to prevent PyMuPDF overflow
+    # PDF proof is just for preview, doesn't need full resolution
+    max_dimension = 8000  # Conservative limit for PyMuPDF
+    if img.width > max_dimension or img.height > max_dimension:
+        scale_factor = min(max_dimension / img.width, max_dimension / img.height)
+        new_width = int(img.width * scale_factor)
+        new_height = int(img.height * scale_factor)
+        logging.info(f"Downsampling PDF proof from {img.width}x{img.height} to {new_width}x{new_height} pixels")
+        img = img.resize((new_width, new_height), Image.LANCZOS)
+
     with io.BytesIO() as buf:
         rgb = img.convert("RGB")
         rgb.save(buf, format="PNG")
