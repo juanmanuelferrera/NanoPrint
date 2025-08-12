@@ -25,8 +25,8 @@ def _render_pdf_page_to_pil(src_doc: fitz.Document, page_index: int, target_heig
     if w_pt <= 0:
         w_pt = 1.0
     
-    # Sample at 200 DPI to avoid memory issues with high DPI
-    sample_dpi = 200
+    # Sample at higher DPI for better text quality, but still reasonable for memory
+    sample_dpi = 400  # Increased from 200 for better text quality
     sample_scale = sample_dpi / 72.0  # PyMuPDF uses 72 DPI as base
     
     logging.debug(f"Rendering page {page_index}: {w_pt:.1f}x{h_pt:.1f}pt at {sample_dpi} DPI")

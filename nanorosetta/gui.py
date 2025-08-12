@@ -283,8 +283,10 @@ class NanoPrintGUI(tk.Tk):
             svg_width = maxx - minx
             svg_height = maxy - miny
             
-            # For small page counts, use content-based sizing instead of raw SVG bounds
-            if len(placements) <= 5:  # Small layouts
+            # Always use content-based sizing for better results
+            # Small layouts get tighter fitting, larger layouts get some extra space
+            self.logger.info(f"Using content-based canvas sizing for {len(placements)} placements")
+            if True:  # Always use content-based sizing
                 # Calculate actual content bounds from placements
                 if placements:
                     content_minx = min(pl.center_xy_mm[0] - pl.width_mm/2 for pl in placements)
@@ -294,6 +296,11 @@ class NanoPrintGUI(tk.Tk):
                     
                     content_width = content_maxx - content_minx
                     content_height = content_maxy - content_miny
+                    
+                    self.logger.debug(f"Content bounds: ({content_minx:.1f}, {content_miny:.1f}) to ({content_maxx:.1f}, {content_maxy:.1f})")
+                    self.logger.debug(f"Content dimensions: {content_width:.1f} x {content_height:.1f} mm")
+                    self.logger.debug(f"SVG bounds: ({minx:.1f}, {miny:.1f}) to ({maxx:.1f}, {maxy:.1f})")
+                    self.logger.debug(f"SVG dimensions: {svg_width:.1f} x {svg_height:.1f} mm")
                     
                     # Use content size + reasonable margin instead of full SVG bounds
                     margin = float(self.canvas_margin_var.get())
