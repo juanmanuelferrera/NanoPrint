@@ -20,11 +20,17 @@ pip install -r requirements.txt
 python nanoprint.py
 ```
 
-- Select Input PDFs, Outer SVG, and optional Inner SVGs
+- Select Input PDFs, Outer SVG, and optional Inner SVGs (inner shapes are optional)
 - Use "Optimize for DPI" (e.g., 200 for large text docs)
 - Use "Max Canvas Pixels" (e.g., 50,000,000 for big jobs)
 - Clear buttons let you replace selections without restarting
 - Click Run to generate outputs (PDF proof and/or TIFF)
+
+**Recent Improvements:**
+- **Smart Canvas Sizing**: Automatically fits canvas to content instead of using raw SVG coordinates
+- **Grid Layout**: Pages arranged left-to-right, top-to-bottom in clean rows (not curved streamlines)
+- **Single Page Optimization**: Conservative sizing for 1-page layouts prevents memory overflow
+- **Enhanced Logging**: Comprehensive debug information for troubleshooting layout decisions
 
 ## CLI Usage
 
@@ -127,11 +133,15 @@ python -m nanorosetta.cli compose --help
 
 ## Troubleshooting
 
-### Exit Code 5: Image Dimensions Overflow
+### Error Code 5: Image Dimensions Overflow (RESOLVED)
 
-If you get "exit code 5: image dimensions might overflow":
+**Status: Fixed in latest version**
+- ✅ Automatic canvas sizing prevents oversized outputs
+- ✅ PDF proof downsampling eliminates PyMuPDF overflow
+- ✅ Single page conservative sizing avoids memory issues
+- ✅ Content-based canvas fits actual page layout
 
-**Quick Fix:**
+**If you still encounter issues:**
 ```bash
 # Use --optimize-for-dpi to auto-scale SVG shapes
 python -m nanorosetta.cli compose \
@@ -149,6 +159,26 @@ python -m nanorosetta.cli compose \
 **Debug Information:**
 - Check `nanorosetta_debug.log` for detailed execution info
 - Shows canvas dimensions, pixel counts, and where execution fails
+
+## Latest Features & Fixes
+
+### Smart Layout Engine
+- **Rectangular Grid Layout**: Pages arrange in clean left-to-right, top-to-bottom rows
+- **Content-Based Canvas**: Canvas automatically sizes to fit actual page layout
+- **SVG Coordinate Scaling**: Intelligent handling of different SVG coordinate systems
+- **Packing Analysis**: Real-time efficiency metrics show how well pages fill available space
+
+### Memory & Performance
+- **PDF Sampling**: 200 DPI sampling with high-quality scaling prevents memory overflow
+- **Automatic DPI Reduction**: Built-in safeguards against excessive pixel dimensions
+- **PyMuPDF Protection**: PDF proof downsampling eliminates image insertion limits
+- **Single Page Optimization**: Conservative sizing for small layouts
+
+### User Experience
+- **Comprehensive Logging**: Full debug trace of layout decisions and render pipeline
+- **Error Detection**: Special handling for dimension overflow with helpful suggestions
+- **Flexible SVG Support**: Works with or without inner shapes, any coordinate scale
+- **Grid Size Reporting**: Shows calculated rows/columns and spacing information
 - Contains DPI calculations and safety validations
 
 ## How it works (MVP)
