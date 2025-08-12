@@ -196,7 +196,7 @@ def calculate_optimal_page_size(
     total_aspect_area = sum(p.aspect_ratio for p in pages)
     perfect_packing_height = math.sqrt(total_area_mm2 / total_aspect_area)
     
-    logging.info(f"Packing analysis: {actual_pages} pages in {total_area_mm2:.1f}mm² available area")
+    logging.info(f"Packing analysis: {len(pages)} pages in {total_area_mm2:.1f}mm² available area")
     logging.info(f"Perfect packing would use {perfect_packing_height:.1f}mm page height")
     
     # Calculate optimal page height to fill the area
@@ -358,37 +358,44 @@ def plan_layout_any_shape(
     page_cursor = 0
     page_count = len(pages)
     
+    # Collect all possible positions from all streamlines, then sort for left-to-right ordering
+    all_positions = []
+    
     for ln in lines:
+        # Use average page dimensions for step calculation
+        avg_width_mm = nominal_height_mm * sum(p.aspect_ratio for p in pages) / len(pages)
+        step = avg_width_mm + gap_mm
+        
+        for x, y, ang in _arc_length_positions(ln, step_mm=step):
+            all_positions.append((x, y, ang))
+    
+    # Sort positions left-to-right, then top-to-bottom
+    # Primary sort by X (left to right), secondary sort by Y (top to bottom, negative Y is up)
+    all_positions.sort(key=lambda pos: (pos[0], -pos[1]))
+    
+    # Place pages in left-to-right, top-to-bottom order
+    for i, (x, y, ang) in enumerate(all_positions):
         if page_cursor >= page_count:
             break
-        
-        # Determine per-page width from aspect and nominal height
+            
         spec = pages[page_cursor]
         height_mm = nominal_height_mm
         width_mm = spec.aspect_ratio * height_mm
-        step = width_mm + gap_mm
         
-        for x, y, ang in _arc_length_positions(ln, step_mm=step):
-            spec = pages[page_cursor]
-            height_mm = nominal_height_mm
-            width_mm = spec.aspect_ratio * height_mm
-            
-            rot = 0.0
-            if orientation == "tangent":
-                rot = ang
-            
-            placement = Placement(
-                page_global_index=page_cursor,
-                doc_index=spec.doc_index,
-                page_index=spec.page_index,
-                center_xy_mm=(x, y),
-                width_mm=width_mm,
-                height_mm=height_mm,
-                rotation_deg=rot,
-            )
-            placements.append(placement)
-            page_cursor += 1
-            if page_cursor >= page_count:
-                break
+        rot = 0.0
+        if orientation == "tangent":
+            rot = ang
+        
+        placement = Placement(
+            page_global_index=page_cursor,
+            doc_index=spec.doc_index,
+            page_index=spec.page_index,
+            center_xy_mm=(x, y),
+            width_mm=width_mm,
+            height_mm=height_mm,
+            rotation_deg=rot,
+        )
+        placements.append(placement)
+        page_cursor += 1
     
     return placements
