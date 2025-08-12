@@ -358,23 +358,45 @@ def plan_layout_any_shape(
     page_cursor = 0
     page_count = len(pages)
     
-    # Collect all possible positions from all streamlines, then sort for left-to-right ordering
-    all_positions = []
+    # Generate rectangular grid positions within the allowed region
+    # Calculate average page dimensions
+    avg_width_mm = nominal_height_mm * sum(p.aspect_ratio for p in pages) / len(pages)
     
-    for ln in lines:
-        # Use average page dimensions for step calculation
-        avg_width_mm = nominal_height_mm * sum(p.aspect_ratio for p in pages) / len(pages)
-        step = avg_width_mm + gap_mm
-        
-        for x, y, ang in _arc_length_positions(ln, step_mm=step):
-            all_positions.append((x, y, ang))
+    # Get bounding box of allowed region
+    minx, miny, maxx, maxy = allowed_region_mm.bounds
+    region_width = maxx - minx
+    region_height = maxy - miny
     
-    # Sort positions left-to-right, then top-to-bottom
-    # Primary sort by X (left to right), secondary sort by Y (top to bottom, negative Y is up)
-    all_positions.sort(key=lambda pos: (pos[0], -pos[1]))
+    # Calculate grid spacing
+    step_x = avg_width_mm + gap_mm
+    step_y = nominal_height_mm + gap_mm
     
-    # Place pages in left-to-right, top-to-bottom order
-    for i, (x, y, ang) in enumerate(all_positions):
+    # Calculate number of columns and rows that fit
+    cols = max(1, int(region_width / step_x))
+    rows = max(1, int(region_height / step_y))
+    
+    logging.info(f"Grid layout: {cols} columns × {rows} rows (step: {step_x:.1f}×{step_y:.1f}mm)")
+    
+    # Generate grid positions (left-to-right, top-to-bottom)
+    grid_positions = []
+    for row in range(rows):
+        for col in range(cols):
+            # Calculate position within bounding box
+            x = minx + (col + 0.5) * step_x
+            y = maxy - (row + 0.5) * step_y  # Start from top
+            
+            # Check if position is actually inside the allowed region
+            from shapely.geometry import Point
+            if allowed_region_mm.contains(Point(x, y)):
+                grid_positions.append((x, y, 0.0))  # 0.0 angle for rectangular grid
+            
+            if len(grid_positions) >= page_count:
+                break
+        if len(grid_positions) >= page_count:
+            break
+    
+    # Place pages in grid order
+    for i, (x, y, ang) in enumerate(grid_positions):
         if page_cursor >= page_count:
             break
             
