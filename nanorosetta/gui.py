@@ -300,6 +300,11 @@ class NanoPrintGUI(tk.Tk):
                     width_mm = content_width + 2 * margin
                     height_mm = content_height + 2 * margin
                     
+                    # Ensure minimum canvas size for visibility
+                    min_canvas_mm = 20.0  # At least 20mm per dimension
+                    width_mm = max(width_mm, min_canvas_mm)
+                    height_mm = max(height_mm, min_canvas_mm)
+                    
                     self.logger.info(f"Content-based canvas: {width_mm:.1f}x{height_mm:.1f}mm (content: {content_width:.1f}x{content_height:.1f}mm)")
                 else:
                     # Fallback for no placements

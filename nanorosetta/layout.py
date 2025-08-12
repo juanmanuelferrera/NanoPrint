@@ -337,9 +337,9 @@ def plan_layout_any_shape(
             page = pages[0]
             aspect_ratio = page.width_pt / page.height_pt if page.height_pt > 0 else 1.0
             
-            # Use a reasonable height (e.g., 10mm for small pages, up to 25mm for larger ones)
+            # Use a reasonable height for single pages - make them clearly visible
             # This prevents single pages from being scaled to fill the entire region
-            base_height_mm = min(25.0, max(10.0, nominal_height_mm))
+            base_height_mm = min(25.0, max(15.0, nominal_height_mm))  # Minimum 15mm for visibility
             nominal_height_mm = base_height_mm
             logging.info(f"Single page sized at {nominal_height_mm:.1f}mm height (aspect ratio: {aspect_ratio:.2f})")
         else:
