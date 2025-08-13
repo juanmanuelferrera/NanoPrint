@@ -10,6 +10,8 @@ import fitz  # PyMuPDF
 
 from .geometry import parse_svg_path, parse_combined_svg, boolean_allowed_region
 from .layout import PageSpec, plan_layout_any_shape
+from .optimized_packing import optimized_packing_layout, adaptive_size_packing
+from .pixel_layout import calculate_pixel_layout, calculate_required_region_size_pixels, calculate_svg_scale_factor
 from .render import (
     compose_raster_any_shape,
     save_pdf_proof,
@@ -43,6 +45,12 @@ class NanoPrintGUI(tk.Tk):
         # Combined SVG options
         self.auto_detect_inner_var = tk.BooleanVar(value=False)
         self.min_inner_area_ratio_var = tk.DoubleVar(value=0.01)
+        
+        # Advanced packing options
+        self.use_optimized_packing_var = tk.BooleanVar(value=True)  # Default to True for better results
+        self.adaptive_sizing_var = tk.BooleanVar(value=False)
+        self.target_fill_ratio_var = tk.DoubleVar(value=0.85)
+        self.pixel_first_var = tk.BooleanVar(value=False)
 
         row = 0
         ttk.Label(frm, text="Input PDFs").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -145,6 +153,27 @@ class NanoPrintGUI(tk.Tk):
         ttk.Label(frm, text="Page Margin Bottom (mm)").grid(row=row, column=2, sticky=tk.E, **pad)
         ttk.Entry(frm, textvariable=self.page_margin_bottom_var, width=10).grid(row=row, column=3, sticky=tk.W, **pad)
 
+        # Advanced Packing Options
+        row += 1
+        ttk.Label(frm, text="ADVANCED PACKING", font=("TkDefaultFont", 9, "bold")).grid(row=row, column=0, columnspan=2, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Checkbutton(frm, text="Use optimized packing (recommended for 500+ pages)", 
+                       variable=self.use_optimized_packing_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Checkbutton(frm, text="Adaptive sizing (auto-adjust page sizes for best fit)", 
+                       variable=self.adaptive_sizing_var,
+                       command=self._on_adaptive_sizing_changed).grid(row=row, column=0, columnspan=3, sticky=tk.W, **pad)
+        
+        ttk.Label(frm, text="Target fill:").grid(row=row, column=3, sticky=tk.E, **pad)
+        self.target_fill_entry = ttk.Entry(frm, textvariable=self.target_fill_ratio_var, width=8)
+        self.target_fill_entry.grid(row=row, column=4, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Checkbutton(frm, text="Pixel-first layout (for consistent quality)", 
+                       variable=self.pixel_first_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
+
         row += 1
         ttk.Label(frm, text="Output PDF Proof").grid(row=row, column=0, sticky=tk.W, **pad)
         ttk.Entry(frm, textvariable=self.output_pdf_var).grid(row=row, column=1, columnspan=2, sticky=tk.EW, **pad)
@@ -226,6 +255,15 @@ class NanoPrintGUI(tk.Tk):
             # Re-enable inner shape selection
             self.inner_list.config(state=tk.NORMAL)
             self._log("Auto-detect disabled: manual inner shape selection enabled")
+    
+    def _on_adaptive_sizing_changed(self):
+        """Handle adaptive sizing checkbox changes."""
+        if self.adaptive_sizing_var.get():
+            self.target_fill_entry.config(state=tk.NORMAL)
+            self._log("Adaptive sizing enabled: pages will be auto-sized for optimal space utilization")
+        else:
+            self.target_fill_entry.config(state=tk.DISABLED)
+            self._log("Adaptive sizing disabled: using nominal page sizes")
 
     def _choose_output_pdf(self) -> None:
         p = filedialog.asksaveasfilename(title="Save PDF proof", defaultextension=".pdf", filetypes=[("PDF","*.pdf")])
@@ -323,15 +361,71 @@ class NanoPrintGUI(tk.Tk):
             
             max_canvas_pixels = int(self.max_canvas_pixels_var.get())
             
-            placements = plan_layout_any_shape(
-                pages=pages,
-                allowed_region_mm=allowed,
-                nominal_height_mm=float(self.nominal_height_var.get()),
-                gap_mm=float(self.gap_var.get()),
-                orientation=self.orientation_var.get(),
-                optimize_for_dpi=optimize_dpi,
-                max_canvas_pixels=max_canvas_pixels,
-            )
+            # Choose layout algorithm based on GUI settings
+            if self.pixel_first_var.get():
+                # Pixel-first approach
+                self.logger.debug("Using pixel-first layout approach")
+                
+                # Detect SVG aspect ratio for square canvas generation
+                outer_bounds = outer.bounds
+                current_width_mm = outer_bounds[2] - outer_bounds[0]
+                current_height_mm = outer_bounds[3] - outer_bounds[1]
+                svg_aspect_ratio = current_width_mm / current_height_mm
+                
+                # Calculate exact pixel dimensions needed
+                required_width_px, required_height_px = calculate_required_region_size_pixels(
+                    len(pages), 1700, 2200, 50, target_aspect_ratio=svg_aspect_ratio
+                )
+                
+                # Calculate and apply SVG scaling
+                scale_factor = calculate_svg_scale_factor(
+                    current_width_mm, current_height_mm, required_width_px, required_height_px
+                )
+                
+                self.logger.debug(f"Pixel-first scaling: {scale_factor:.4f}x to create {required_width_px:,}×{required_height_px:,} pixel canvas")
+                
+                # Apply scaling to shapes
+                from shapely.affinity import scale
+                outer = scale(outer, scale_factor, scale_factor)
+                inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
+                allowed = boolean_allowed_region(outer, inners)
+                
+                # Use pixel layout
+                placements = calculate_pixel_layout(
+                    pages, allowed.bounds, 1700, 2200, 50
+                )
+            
+            elif self.use_optimized_packing_var.get() or self.adaptive_sizing_var.get():
+                # Advanced packing approaches
+                self.logger.debug("Using optimized packing approach")
+                
+                if self.adaptive_sizing_var.get():
+                    # Adaptive sizing for optimal space utilization
+                    self.logger.debug(f"Using adaptive sizing with target fill ratio: {self.target_fill_ratio_var.get():.1%}")
+                    placements = adaptive_size_packing(
+                        pages, allowed, self.target_fill_ratio_var.get(), float(self.gap_var.get())
+                    )
+                else:
+                    # Optimized packing with current settings
+                    placements = optimized_packing_layout(
+                        pages, allowed, float(self.nominal_height_var.get()), float(self.gap_var.get()),
+                        size_flexibility=0.15,  # Allow 15% size variation for better packing
+                        prioritize_space_filling=True,
+                        outer_shape=outer,
+                        inner_shapes=inners
+                    )
+            else:
+                # Traditional layout approach
+                self.logger.debug("Using traditional layout approach")
+                placements = plan_layout_any_shape(
+                    pages=pages,
+                    allowed_region_mm=allowed,
+                    nominal_height_mm=float(self.nominal_height_var.get()),
+                    gap_mm=float(self.gap_var.get()),
+                    orientation=self.orientation_var.get(),
+                    optimize_for_dpi=optimize_dpi,
+                    max_canvas_pixels=max_canvas_pixels,
+                )
             if not placements:
                 raise ValueError("No placements computed with current parameters.")
 
