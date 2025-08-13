@@ -27,6 +27,10 @@ python nanoprint.py
 - Click Run to generate outputs (PDF proof and/or TIFF)
 
 **Recent Improvements:**
+- **Optimized Packing Algorithms**: Advanced shape-aware packing for maximum space utilization
+- **Inner Shape Intelligence**: Analyzes inner shape constraints for optimal placement strategies
+- **Pixel-First Layout**: Direct pixel calculations for consistent quality without DPI dependencies
+- **Adaptive Sizing**: Automatically adjusts page sizes to achieve target space utilization
 - **Smart Canvas Sizing**: Automatically fits canvas to content instead of using raw SVG coordinates
 - **Grid Layout**: Pages arranged left-to-right, top-to-bottom in clean rows (not curved streamlines)
 - **Single Page Optimization**: Conservative sizing for 1-page layouts prevents memory overflow
@@ -54,6 +58,62 @@ Quickly see which shape elements your SVG contains (path/rect/circle/ellipse):
 python -m nanorosetta.cli diagnose ./examples/outer_rect.svg
 ```
 
+### Advanced Packing & Layout (New)
+
+#### Optimized Packing for Maximum Space Utilization
+```bash
+python -m nanorosetta.cli compose \
+  --input ./examples/sample.pdf \
+  --outer-shape ./examples/outer_rect.svg \
+  --inner-shape ./examples/inner_circle.svg \
+  --use-optimized-packing \
+  --packing-flexibility 0.15 \
+  --export-tiff ./out/master.tiff
+```
+
+#### Adaptive Sizing with Target Fill Ratio
+```bash
+python -m nanorosetta.cli compose \
+  --input ./examples/sample.pdf \
+  --outer-shape ./examples/outer_rect.svg \
+  --inner-shape ./examples/inner_circle.svg \
+  --adaptive-sizing \
+  --target-fill-ratio 0.90 \
+  --export-tiff ./out/master.tiff
+```
+
+#### Pixel-First Layout for Consistent Quality
+```bash
+python -m nanorosetta.cli compose \
+  --input ./examples/sample.pdf \
+  --outer-shape ./examples/outer_rect.svg \
+  --inner-shape ./examples/inner_circle.svg \
+  --pixel-first \
+  --standard-page-width-px 1700 \
+  --standard-page-height-px 2200 \
+  --export-tiff ./out/master.tiff
+```
+
+#### Inner Shape Positioning (9 Options)
+```bash
+python -m nanorosetta.cli compose \
+  --input ./examples/sample.pdf \
+  --outer-shape ./examples/outer_rect.svg \
+  --inner-shape ./examples/inner_circle.svg \
+  --inner-position top-left \
+  --use-optimized-packing \
+  --export-tiff ./out/master.tiff
+```
+
+**Available inner positions:** center, top-left, top-center, top-right, middle-left, middle-right, bottom-left, bottom-center, bottom-right
+
+**Inner Shape Positioning Logic:**
+- **Default**: Inner shapes are placed at their original SVG coordinates (typically center)
+- **With --inner-position**: Inner shapes are automatically repositioned relative to the outer shape bounds
+- **After scaling**: Inner shapes maintain their relative position even when SVG shapes are auto-scaled
+- **Multiple inner shapes**: Each inner shape can have the same relative positioning applied
+- **Coordinates**: Positioning uses the outer shape's bounding box as reference, not the original SVG coordinate system
+
 ### DPI Optimization (Improved)
 
 ```bash
@@ -74,23 +134,27 @@ This will:
 
 ### Large Document Support
 
-For documents with many pages (e.g., 2,000 pages), use memory management:
+For documents with many pages (e.g., 1,034+ pages), use optimized packing:
 
 ```bash
 python -m nanorosetta.cli compose \
   --input ./large_document.pdf \
   --outer-shape ./examples/outer_rect.svg \
   --inner-shape ./examples/inner_circle.svg \
-  --optimize-for-dpi 200 \
-  --max-canvas-pixels 50000000 \
+  --use-optimized-packing \
+  --adaptive-sizing \
+  --target-fill-ratio 0.85 \
+  --max-canvas-pixels 200000000 \
   --export-tiff ./out/large_output.tiff
 ```
 
-**Memory Management:**
-- `--max-canvas-pixels 50000000` (50M pixels) for large documents
-- `--optimize-for-dpi 200` recommended for text-heavy documents
-- **SVG shapes are automatically resized** to fit the calculated page area
-- Prevents crashes on systems with limited RAM
+**Large Document Strategies:**
+- `--use-optimized-packing` for maximum space efficiency
+- `--adaptive-sizing` automatically adjusts page sizes for best fit
+- `--max-canvas-pixels 200000000` (200M pixels) for very large layouts
+- `--pixel-first` for consistent quality at scale
+- **Intelligent shape analysis** adapts packing strategy to SVG geometry
+- **Inner shape awareness** optimizes placement around constraints
 
 **Flow for DPI Optimization:**
 1. **User specifies target DPI** (e.g., 200 DPI for final output quality)
@@ -116,14 +180,29 @@ python -m nanorosetta.cli compose \
 - Full error context with stack traces
 
 ### Key Options
+
+#### Traditional Layout
 - `--outer-shape PATH` SVG path for the outer constraint (supports arbitrary shapes)
 - `--inner-shape PATH` SVG path(s) for inner keep‑out; repeatable
+- `--inner-position POSITION` Position inner shape: center (default), top-left, top-center, top-right, middle-left, middle-right, bottom-left, bottom-center, bottom-right
 - `--optimize-for-dpi DPI` **Auto-scale SVG shapes** to fit all pages at target DPI (recommended for dimension overflow)
 - `--max-canvas-pixels PIXELS` Maximum canvas pixels for memory management
 - `--orientation tangent|upright` page orientation relative to local flow
 - `--gap-mm 0.5` minimum gap between pages
 - `--scale-min 0.1 --scale-max 1.0` per‑page scale bounds
 - `--tiff-dpi 600|1200|2400` output DPI for raster master
+
+#### Advanced Packing Options
+- `--use-optimized-packing` Enable shape-aware packing algorithms for better space utilization
+- `--adaptive-sizing` Automatically adjust page sizes to achieve target fill ratio
+- `--packing-flexibility 0.1` Allow page size variation for better packing (0.0-1.0)
+- `--target-fill-ratio 0.85` Target space utilization ratio for adaptive sizing
+
+#### Pixel-First Layout
+- `--pixel-first` Use pixel-first layout approach (calculates exact canvas size needed)
+- `--standard-page-width-px 1700` Standard page width in pixels
+- `--standard-page-height-px 2200` Standard page height in pixels
+- `--gap-px 50` Gap between pages in pixels
 
 See all options:
 
@@ -161,6 +240,26 @@ python -m nanorosetta.cli compose \
 - Shows canvas dimensions, pixel counts, and where execution fails
 
 ## Latest Features & Fixes
+
+### Advanced Packing Engine (New)
+- **Shape-Aware Packing**: Analyzes SVG geometry (rectangular, square, elongated, complex) and adapts packing strategy accordingly
+- **Inner Shape Intelligence**: Detects central, offset, or distributed inner shapes and optimizes placement strategies
+- **Adaptive Sizing**: Automatically adjusts page sizes to achieve target space utilization (default 85%)
+- **Size Flexibility**: Allows controlled page size variation (default 10%) for better packing efficiency
+- **Collision Detection**: Prevents page overlap while maintaining minimum gaps
+- **Utilization Metrics**: Reports space efficiency and placement success rates
+
+### Inner Shape Positioning System (New)
+- **9 Position Options**: Place inner shapes at center (default), corners, or edges relative to outer shape
+- **Automatic Repositioning**: Inner shapes maintain relative position even after SVG scaling
+- **Constraint Analysis**: System analyzes inner shape size and position to optimize packing approach
+- **Multi-Shape Support**: Handle multiple inner shapes with different positioning strategies
+
+### Pixel-First Layout (New)
+- **Direct Pixel Calculations**: Calculate exact canvas size needed without DPI dependencies
+- **Aspect Ratio Preservation**: Ensures square SVGs produce square canvases by adjusting grid ratios
+- **Consistent Quality**: Fixed 200 DPI metadata with pixel-based dimensions for predictable output
+- **Large Layout Support**: Handles 1000+ pages efficiently with optimized pixel calculations
 
 ### Smart Layout Engine
 - **Rectangular Grid Layout**: Pages arrange in clean left-to-right, top-to-bottom rows
