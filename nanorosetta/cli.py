@@ -10,7 +10,7 @@ from typing import List, Tuple
 import fitz  # PyMuPDF
 from shapely.geometry import MultiPolygon
 
-from .geometry import boolean_allowed_region, parse_svg_path, position_inner_shape_relative
+from .geometry import boolean_allowed_region, parse_svg_path, parse_combined_svg, position_inner_shape_relative
 from .pixel_layout import calculate_required_region_size_pixels, calculate_svg_scale_factor, calculate_pixel_layout
 from .layout import PageSpec, plan_layout_any_shape, calculate_optimal_page_size
 from .optimized_packing import optimized_packing_layout, hybrid_packing_layout, adaptive_size_packing
@@ -72,6 +72,27 @@ def cli_diagnose(args: argparse.Namespace) -> int:
     try:
         info = diagnose_svg_file(args.svg_file)
         print(info)
+        
+        # Also show automatic shape detection results
+        print("\n" + "="*50)
+        print("AUTOMATIC SHAPE DETECTION ANALYSIS")
+        print("="*50)
+        
+        try:
+            outer, inners = parse_combined_svg(args.svg_file)
+            print(f"✅ Auto-detection successful:")
+            print(f"   Outer shape: {outer.area:.2f} area, bounds {outer.bounds}")
+            print(f"   Inner shapes: {len(inners)}")
+            for i, inner in enumerate(inners):
+                ratio = inner.area / outer.area
+                print(f"   - Inner {i+1}: {inner.area:.2f} area ({ratio:.1%} of outer), bounds {inner.bounds}")
+            
+            if len(inners) == 0:
+                print("   Note: No inner shapes detected (all shapes below 1% area threshold)")
+                print("   Use --min-inner-area-ratio to adjust detection sensitivity")
+        except Exception as detect_error:
+            print(f"❌ Auto-detection failed: {detect_error}")
+        
         return 0
     except Exception as e:
         print(f"Error: {e}")
@@ -98,23 +119,35 @@ def cli_compose(args: argparse.Namespace) -> int:
         print("No pages found in input PDFs")
         return 1
     
-    # Load SVG shapes
+    # Load SVG shapes - support both combined and separate files
     try:
-        logging.info(f"Parsing outer shape: {args.outer_shape}")
-        outer = parse_svg_path(args.outer_shape)
-        logging.debug(f"Outer shape bounds: {outer.bounds}")
-        
-        inners = []
-        if args.inner_shape:
-            logging.info(f"Parsing {len(args.inner_shape)} inner shape(s)")
-            for inner_path in args.inner_shape:
-                inner = parse_svg_path(inner_path)
-                # Apply relative positioning
-                if args.inner_position != "center":
-                    logging.info(f"Positioning inner shape at: {args.inner_position}")
-                    inner = position_inner_shape_relative(inner, outer, args.inner_position)
-                inners.append(inner)
-                logging.debug(f"Inner shape bounds: {inner.bounds}")
+        if args.auto_detect_inner:
+            # Use automatic shape detection from single SVG file
+            logging.info(f"Auto-detecting shapes in: {args.outer_shape}")
+            outer, inners = parse_combined_svg(args.outer_shape, args.min_inner_area_ratio)
+            logging.info(f"Auto-detected: 1 outer shape, {len(inners)} inner shapes")
+            
+            # Apply relative positioning to auto-detected inner shapes
+            if args.inner_position != "center" and inners:
+                logging.info(f"Repositioning {len(inners)} auto-detected inner shapes to: {args.inner_position}")
+                inners = [position_inner_shape_relative(inner, outer, args.inner_position) for inner in inners]
+        else:
+            # Traditional separate file approach
+            logging.info(f"Parsing outer shape: {args.outer_shape}")
+            outer = parse_svg_path(args.outer_shape)
+            logging.debug(f"Outer shape bounds: {outer.bounds}")
+            
+            inners = []
+            if args.inner_shape:
+                logging.info(f"Parsing {len(args.inner_shape)} inner shape(s)")
+                for inner_path in args.inner_shape:
+                    inner = parse_svg_path(inner_path)
+                    # Apply relative positioning
+                    if args.inner_position != "center":
+                        logging.info(f"Positioning inner shape at: {args.inner_position}")
+                        inner = position_inner_shape_relative(inner, outer, args.inner_position)
+                    inners.append(inner)
+                    logging.debug(f"Inner shape bounds: {inner.bounds}")
     except Exception as e:
         logging.error(f"Error parsing SVG shapes: {e}")
         print(f"Error parsing SVG shapes: {e}")
@@ -460,6 +493,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--packing-flexibility", type=float, default=0.1, help="Allow page size variation for better packing (0.0-1.0, default: 0.1)")
     c.add_argument("--adaptive-sizing", action="store_true", help="Automatically adjust page sizes to achieve target fill ratio")
     c.add_argument("--target-fill-ratio", type=float, default=0.85, help="Target space utilization ratio for adaptive sizing (default: 0.85)")
+    
+    # Combined SVG options
+    c.add_argument("--auto-detect-inner", action="store_true", help="Automatically detect inner shapes from outer SVG file (largest shape = outer, smaller shapes = inner)")
+    c.add_argument("--min-inner-area-ratio", type=float, default=0.01, help="Minimum area ratio for auto-detected inner shapes (relative to outer shape, default: 0.01)")
 
     c.set_defaults(func=cli_compose)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
@@ -46,8 +46,8 @@ def diagnose_svg_file(svg_path: str) -> str:
         return f"Error diagnosing SVG file {svg_path}: {str(e)}"
 
 
-def parse_svg_path(svg_path: str) -> MultiPolygon:
-    """Parse SVG file and convert to Shapely MultiPolygon."""
+def _extract_polygons_from_svg(svg_path: str) -> List[Polygon]:
+    """Extract all valid polygons from an SVG file."""
     try:
         paths, attributes, svg_attributes = svg2paths2(svg_path)
         
@@ -133,16 +133,75 @@ def parse_svg_path(svg_path: str) -> MultiPolygon:
                     if polygon.is_valid:
                         polygons.append(polygon)
         
-        if not polygons:
-            raise ValueError(f"No valid polygons found in {svg_path}. "
-                           f"Supported elements: <path>, <rect>, <circle>, <ellipse>. "
-                           f"Please check that the SVG contains valid shape elements.")
-        
-        return MultiPolygon(polygons)
+        return polygons
         
     except Exception as e:
         raise ValueError(f"Failed to parse SVG file {svg_path}: {str(e)}. "
                         f"Please ensure the file is a valid SVG with shape elements.")
+
+
+def parse_svg_path(svg_path: str) -> MultiPolygon:
+    """Parse SVG file and convert to Shapely MultiPolygon (legacy single-shape function)."""
+    polygons = _extract_polygons_from_svg(svg_path)
+    
+    if not polygons:
+        raise ValueError(f"No valid polygons found in {svg_path}. "
+                       f"Supported elements: <path>, <rect>, <circle>, <ellipse>. "
+                       f"Please check that the SVG contains valid shape elements.")
+    
+    return MultiPolygon(polygons)
+
+
+def parse_combined_svg(svg_path: str, min_inner_area_ratio: float = 0.01) -> Tuple[MultiPolygon, List[MultiPolygon]]:
+    """
+    Parse SVG file with automatic shape detection based on size.
+    
+    Args:
+        svg_path: Path to SVG file containing multiple shapes
+        min_inner_area_ratio: Minimum area ratio for a shape to be considered as inner keep-out
+                              (relative to largest shape area)
+    
+    Returns:
+        Tuple of (outer_shape, list_of_inner_shapes)
+        - outer_shape: Largest shape (outer boundary)
+        - list_of_inner_shapes: All other shapes above minimum area threshold
+    """
+    import logging
+    
+    polygons = _extract_polygons_from_svg(svg_path)
+    
+    if not polygons:
+        raise ValueError(f"No valid polygons found in {svg_path}. "
+                       f"Supported elements: <path>, <rect>, <circle>, <ellipse>. "
+                       f"Please check that the SVG contains valid shape elements.")
+    
+    # Sort by area (largest first)
+    polygons_with_area = [(poly, poly.area) for poly in polygons]
+    polygons_with_area.sort(key=lambda x: x[1], reverse=True)
+    
+    # Largest shape becomes the outer boundary
+    outer_polygon, outer_area = polygons_with_area[0]
+    outer_shape = MultiPolygon([outer_polygon])
+    
+    # All other shapes above minimum area threshold become inner keep-outs
+    min_area = outer_area * min_inner_area_ratio
+    inner_shapes = []
+    
+    for poly, area in polygons_with_area[1:]:
+        if area >= min_area:
+            inner_shapes.append(MultiPolygon([poly]))
+        else:
+            logging.debug(f"Ignoring small shape with area {area:.2f} (< {min_area:.2f})")
+    
+    logging.info(f"Parsed combined SVG: 1 outer shape ({outer_area:.2f} area), "
+                f"{len(inner_shapes)} inner shapes")
+    
+    # Log shape details
+    logging.info(f"Outer shape bounds: {outer_shape.bounds}")
+    for i, inner in enumerate(inner_shapes):
+        logging.info(f"Inner shape {i+1} bounds: {inner.bounds}, area: {inner.area:.2f}")
+    
+    return outer_shape, inner_shapes
 
 
 def position_inner_shape_relative(
