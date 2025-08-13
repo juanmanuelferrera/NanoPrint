@@ -12,10 +12,17 @@ from .units import mm_to_px, mm_to_pt
 from .layout import Placement
 
 
-def _render_pdf_page_to_pil(src_doc: fitz.Document, page_index: int, target_height_px: int) -> Image.Image:
+def _render_pdf_page_to_pil(src_doc: fitz.Document, page_index: int, target_width_px: int, target_height_px: int,
+                           margins_pt: tuple[float, float, float, float] = None) -> Image.Image:
     """
-    Render PDF page to PIL Image by sampling at 200 DPI then scaling up.
-    This prevents memory issues when target dimensions are very large.
+    Render PDF page to PIL Image with consistent dimensions (e.g., 1700x2200).
+    
+    Args:
+        src_doc: PyMuPDF document
+        page_index: Page index to render
+        target_width_px: Target width in pixels (e.g., 1700)
+        target_height_px: Target height in pixels (e.g., 2200)
+        margins_pt: Optional margins in points as (left, top, right, bottom)
     """
     page = src_doc.load_page(page_index)
     h_pt = page.rect.height
@@ -25,30 +32,45 @@ def _render_pdf_page_to_pil(src_doc: fitz.Document, page_index: int, target_heig
     if w_pt <= 0:
         w_pt = 1.0
     
-    # Sample at 200 DPI - sufficient quality, focus on page sizing instead
-    sample_dpi = 200
-    sample_scale = sample_dpi / 72.0  # PyMuPDF uses 72 DPI as base
+    # Apply margins if specified
+    crop_rect = None
+    if margins_pt is not None:
+        left_margin, top_margin, right_margin, bottom_margin = margins_pt
+        crop_rect = fitz.Rect(
+            left_margin, 
+            top_margin, 
+            w_pt - right_margin, 
+            h_pt - bottom_margin
+        )
+        # Ensure crop rect is valid
+        if crop_rect.width > 0 and crop_rect.height > 0:
+            # Update dimensions to cropped size
+            w_pt = crop_rect.width
+            h_pt = crop_rect.height
+        else:
+            crop_rect = None
     
-    logging.debug(f"Rendering page {page_index}: {w_pt:.1f}x{h_pt:.1f}pt at {sample_dpi} DPI")
+    # Calculate scale to achieve target pixel dimensions
+    # We want consistent output regardless of source page size
+    scale_x = target_width_px / w_pt * 72.0 / 72.0  # PyMuPDF uses 72 DPI as base
+    scale_y = target_height_px / h_pt * 72.0 / 72.0
     
-    # Create pixmap at sample resolution
-    mat = fitz.Matrix(sample_scale, sample_scale)
-    pm = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY, alpha=False)
-    sampled_img = Image.frombytes("L", (pm.width, pm.height), pm.samples)
+    logging.debug(f"Rendering page {page_index}: {w_pt:.1f}x{h_pt:.1f}pt to {target_width_px}x{target_height_px}px")
     
-    logging.debug(f"Sampled image size: {sampled_img.width}x{sampled_img.height} pixels")
+    # Create pixmap directly at target resolution
+    mat = fitz.Matrix(scale_x, scale_y)
+    pm = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY, alpha=False, clip=crop_rect)
+    final_img = Image.frombytes("L", (pm.width, pm.height), pm.samples)
     
-    # Calculate target width maintaining aspect ratio
-    target_width_px = int((target_height_px * w_pt) / h_pt)
+    logging.debug(f"Final image size: {final_img.width}x{final_img.height} pixels")
     
-    logging.debug(f"Scaling to target size: {target_width_px}x{target_height_px} pixels")
+    # Ensure exact target dimensions (crop or pad if needed due to rounding)
+    if final_img.size != (target_width_px, target_height_px):
+        # Resize to exact target dimensions
+        final_img = final_img.resize((target_width_px, target_height_px), Image.LANCZOS)
+        logging.debug(f"Resized to exact target: {final_img.width}x{final_img.height} pixels")
     
-    # Scale up to target dimensions using high-quality resampling
-    if target_width_px != sampled_img.width or target_height_px != sampled_img.height:
-        scaled_img = sampled_img.resize((target_width_px, target_height_px), Image.LANCZOS)
-        return scaled_img
-    else:
-        return sampled_img
+    return final_img
 
 
 def validate_canvas_dimensions(canvas_width_mm: float, canvas_height_mm: float, dpi: int) -> tuple[int, int, int]:
@@ -105,10 +127,25 @@ def compose_raster_any_shape(
     canvas_height_mm: float,
     origin_center: bool = True,
     background: int = 255,
+    page_margins_mm: tuple[float, float, float, float] = None,
+    standard_page_width_px: int = 1700,
+    standard_page_height_px: int = 2200,
 ) -> Image.Image:
     logging.info(f"Starting raster composition with {len(placements)} placements")
     logging.debug(f"Canvas: {canvas_width_mm:.2f}x{canvas_height_mm:.2f}mm, target DPI: {dpi}")
     logging.debug(f"Origin center: {origin_center}, background: {background}")
+    
+    # Convert page margins from mm to points if provided
+    margins_pt = None
+    if page_margins_mm is not None:
+        left_mm, top_mm, right_mm, bottom_mm = page_margins_mm
+        margins_pt = (
+            mm_to_pt(left_mm),
+            mm_to_pt(top_mm), 
+            mm_to_pt(right_mm),
+            mm_to_pt(bottom_mm)
+        )
+        logging.debug(f"Page margins: {page_margins_mm} mm = {margins_pt} pt")
     
     # Validate and potentially reduce DPI to prevent overflow
     logging.debug("Calling validate_canvas_dimensions")
@@ -137,13 +174,33 @@ def compose_raster_any_shape(
     cx = canvas_w_px // 2 if origin_center else 0
     cy = canvas_h_px // 2 if origin_center else 0
 
+    logging.info(f"Using standard page dimensions: {standard_page_width_px}x{standard_page_height_px}px")
     logging.debug(f"Processing {len(placements)} placements")
     for idx, pl in enumerate(placements):
         logging.debug(f"Processing placement {idx+1}/{len(placements)}: doc_index={pl.doc_index}, page={pl.page_index}")
         src_doc = doc_registry[pl.doc_index]
+        
+        # Scale standard page dimensions based on placement size
         target_h_px = max(1, mm_to_px(pl.height_mm, safe_dpi))
-        logging.debug(f"Target height: {pl.height_mm:.2f}mm = {target_h_px}px")
-        page_img = _render_pdf_page_to_pil(src_doc, pl.page_index, target_h_px)
+        target_w_px = max(1, mm_to_px(pl.width_mm, safe_dpi))
+        
+        # Render page with consistent aspect ratio but scaled to placement size
+        # Maintain the standard aspect ratio (1700:2200 = 0.773)
+        standard_aspect = standard_page_width_px / standard_page_height_px
+        placement_aspect = target_w_px / target_h_px
+        
+        if abs(placement_aspect - standard_aspect) > 0.1:  # If aspect ratios differ significantly
+            # Use placement dimensions directly
+            final_w_px = target_w_px
+            final_h_px = target_h_px
+        else:
+            # Scale standard dimensions proportionally
+            scale_factor = target_h_px / standard_page_height_px
+            final_w_px = int(standard_page_width_px * scale_factor)
+            final_h_px = int(standard_page_height_px * scale_factor)
+        
+        logging.debug(f"Target dimensions: {final_w_px}x{final_h_px}px (from {pl.width_mm:.2f}x{pl.height_mm:.2f}mm)")
+        page_img = _render_pdf_page_to_pil(src_doc, pl.page_index, final_w_px, final_h_px, margins_pt)
         rot = page_img.rotate(-pl.rotation_deg, expand=True, fillcolor=255)
 
         x_center_px = cx + mm_to_px(pl.center_xy_mm[0], safe_dpi)
@@ -176,28 +233,32 @@ def compute_dpi_for_target_mb(width_mm: float, height_mm: float, target_mb: floa
     return int(max(50, round(dpi)))  # Minimum 50 DPI
 
 
-def save_tiff_1bit(img: Image.Image, path: str, dpi: int, compression: Optional[str] = None) -> None:
+def save_tiff_1bit(img: Image.Image, path: str, compression: Optional[str] = None) -> None:
     img_1 = img.convert("1")
+    # Fixed DPI metadata at 200 DPI
+    fixed_dpi = 200
     if compression is None or compression == "none":
-        img_1.save(path, format="TIFF", dpi=(dpi, dpi))
+        img_1.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
     elif compression == "deflate":
-        img_1.save(path, format="TIFF", compression="tiff_deflate", dpi=(dpi, dpi))
+        img_1.save(path, format="TIFF", compression="tiff_deflate", dpi=(fixed_dpi, fixed_dpi))
     elif compression == "lzw":
-        img_1.save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi))
+        img_1.save(path, format="TIFF", compression="tiff_lzw", dpi=(fixed_dpi, fixed_dpi))
     else:
-        img_1.save(path, format="TIFF", dpi=(dpi, dpi))
+        img_1.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
 
 
-def save_tiff_gray(img: Image.Image, path: str, dpi: int, compression: Optional[str] = None) -> None:
+def save_tiff_gray(img: Image.Image, path: str, compression: Optional[str] = None) -> None:
     img_g = img.convert("L")
+    # Fixed DPI metadata at 200 DPI
+    fixed_dpi = 200
     if compression is None or compression == "none":
-        img_g.save(path, format="TIFF", dpi=(dpi, dpi))
+        img_g.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
     elif compression == "deflate":
-        img_g.save(path, format="TIFF", compression="tiff_deflate", dpi=(dpi, dpi))
+        img_g.save(path, format="TIFF", compression="tiff_deflate", dpi=(fixed_dpi, fixed_dpi))
     elif compression == "lzw":
-        img_g.save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi))
+        img_g.save(path, format="TIFF", compression="tiff_lzw", dpi=(fixed_dpi, fixed_dpi))
     else:
-        img_g.save(path, format="TIFF", dpi=(dpi, dpi))
+        img_g.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
 
 
 def save_pdf_proof(img: Image.Image, path: str, width_mm: float, height_mm: float) -> None:

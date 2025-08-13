@@ -10,8 +10,10 @@ from typing import List, Tuple
 import fitz  # PyMuPDF
 from shapely.geometry import MultiPolygon
 
-from .geometry import boolean_allowed_region, parse_svg_path
+from .geometry import boolean_allowed_region, parse_svg_path, position_inner_shape_relative
+from .pixel_layout import calculate_required_region_size_pixels, calculate_svg_scale_factor, calculate_pixel_layout
 from .layout import PageSpec, plan_layout_any_shape, calculate_optimal_page_size
+from .optimized_packing import optimized_packing_layout, hybrid_packing_layout, adaptive_size_packing
 from .render import (
     compose_raster_any_shape,
     save_pdf_proof,
@@ -107,6 +109,10 @@ def cli_compose(args: argparse.Namespace) -> int:
             logging.info(f"Parsing {len(args.inner_shape)} inner shape(s)")
             for inner_path in args.inner_shape:
                 inner = parse_svg_path(inner_path)
+                # Apply relative positioning
+                if args.inner_position != "center":
+                    logging.info(f"Positioning inner shape at: {args.inner_position}")
+                    inner = position_inner_shape_relative(inner, outer, args.inner_position)
                 inners.append(inner)
                 logging.debug(f"Inner shape bounds: {inner.bounds}")
     except Exception as e:
@@ -114,89 +120,187 @@ def cli_compose(args: argparse.Namespace) -> int:
         print(f"Error parsing SVG shapes: {e}")
         return 5
     
-    # Calculate page dimensions based on DPI optimization if requested
-    page_height_mm = args.nominal_height_mm
-    logging.info(f"Initial page height: {page_height_mm}mm")
-    
-    if args.optimize_for_dpi is not None:
-        logging.info(f"DPI optimization requested for target DPI: {args.optimize_for_dpi}")
-        # For DPI optimization, we need to calculate the required SVG scale
-        # based on the page dimensions and count
+    # Choose layout approach: pixel-first or traditional
+    if args.pixel_first:
+        logging.info("Using pixel-first layout approach")
         
-        # First, calculate what page height we need for the target DPI
-        # This is a simplified calculation - we'll refine it
-        target_dpi = args.optimize_for_dpi
+        # Detect SVG aspect ratio to determine target canvas aspect ratio
+        outer_bounds = outer.bounds
+        current_width_mm = outer_bounds[2] - outer_bounds[0]
+        current_height_mm = outer_bounds[3] - outer_bounds[1]
+        svg_aspect_ratio = current_width_mm / current_height_mm
         
-        # Calculate total area needed for all pages
-        total_page_area_mm2 = 0
-        for page in pages:
-            # Estimate page width based on aspect ratio
-            page_width_mm = page.aspect_ratio * page_height_mm
-            page_area_mm2 = page_width_mm * page_height_mm
-            total_page_area_mm2 += page_area_mm2
+        logging.info(f"SVG aspect ratio: {svg_aspect_ratio:.3f} (1.0 = square)")
         
-        # Add gap area
-        page_count = len(pages)
-        estimated_pages_per_row = math.sqrt(page_count)
-        estimated_rows = page_count / estimated_pages_per_row
+        # Calculate exact pixel dimensions needed
+        required_width_px, required_height_px = calculate_required_region_size_pixels(
+            len(pages),
+            args.standard_page_width_px, 
+            args.standard_page_height_px,
+            args.gap_px,
+            target_aspect_ratio=svg_aspect_ratio
+        )
         
-        avg_page_width_mm = sum(p.aspect_ratio for p in pages) / len(pages) * page_height_mm
-        gap_area_mm2 = (estimated_pages_per_row - 1) * estimated_rows * avg_page_width_mm * args.gap_mm
-        gap_area_mm2 += (estimated_rows - 1) * estimated_pages_per_row * page_height_mm * args.gap_mm
+        # Calculate SVG scale factor (reuse dimensions from above)
         
-        total_needed_area_mm2 = total_page_area_mm2 + gap_area_mm2
+        scale_factor = calculate_svg_scale_factor(
+            current_width_mm, current_height_mm,
+            required_width_px, required_height_px
+        )
         
-        # Calculate current SVG area difference
-        logging.debug("Calculating boolean allowed region from shapes")
-        allowed_region = boolean_allowed_region(outer, inners)
-        current_svg_area_mm2 = allowed_region.area
-        logging.info(f"Current SVG area: {current_svg_area_mm2:.2f} mm²")
-        logging.info(f"Total needed area: {total_needed_area_mm2:.2f} mm²")
+        print(f"Pixel-first scaling: {scale_factor:.4f}x to create {required_width_px:,}×{required_height_px:,} pixel canvas")
+        print(f"This will fit all {len(pages)} pages at {args.standard_page_width_px}×{args.standard_page_height_px} pixels each")
         
-        # Calculate required scale factor for SVG shapes
-        if current_svg_area_mm2 > 0:
-            required_scale = math.sqrt(total_needed_area_mm2 / current_svg_area_mm2)
-            logging.info(f"Required scale factor: {required_scale:.4f}")
-        else:
-            required_scale = 1.0
-            logging.warning("Current SVG area is 0, using scale factor 1.0")
-        
-        # Apply scale to SVG shapes
+        # Apply scaling to SVG shapes
         from shapely.affinity import scale
-        outer = scale(outer, required_scale, required_scale)
-        inners = [scale(inner, required_scale, required_scale) for inner in inners]
+        outer = scale(outer, scale_factor, scale_factor)
+        inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
         
-        # Recalculate allowed region with scaled shapes
+        # Reapply relative positioning after scaling
+        if args.inner_shape and args.inner_position != "center":
+            logging.info(f"Reapplying inner positioning after pixel-first scaling: {args.inner_position}")
+            inners = [position_inner_shape_relative(inner, outer, args.inner_position) for inner in inners]
+        
+        # Use pixel layout
         allowed_region = boolean_allowed_region(outer, inners)
-        
-        # Now calculate optimal page size for the scaled region
-        page_height_mm = calculate_optimal_page_size(
-            allowed_region, pages, target_dpi, args.gap_mm,
-            min_page_height_mm=1.0, max_page_height_mm=50.0, max_canvas_pixels=args.max_canvas_pixels
+        placements = calculate_pixel_layout(
+            pages, 
+            allowed_region.bounds,
+            args.standard_page_width_px,
+            args.standard_page_height_px, 
+            args.gap_px
         )
+        
+    else:
+        # Traditional approach or optimized packing
+        if args.use_optimized_packing or args.adaptive_sizing:
+            logging.info("Using optimized packing approach")
+            
+            # Calculate allowed region first
+            allowed_region = boolean_allowed_region(outer, inners)
+            
+            if args.adaptive_sizing:
+                # Use adaptive sizing to optimize page sizes
+                logging.info(f"Using adaptive sizing with target fill ratio: {args.target_fill_ratio:.1%}")
+                placements = adaptive_size_packing(
+                    pages, allowed_region, args.target_fill_ratio, args.gap_mm
+                )
+            else:
+                # Use optimized packing with specified parameters
+                placements = optimized_packing_layout(
+                    pages, allowed_region, args.nominal_height_mm, args.gap_mm,
+                    size_flexibility=args.packing_flexibility,
+                    prioritize_space_filling=True,
+                    outer_shape=outer,
+                    inner_shapes=inners
+                )
+        else:
+            logging.info("Using traditional layout approach")
+        
+            # Calculate page dimensions based on DPI optimization if requested
+            page_height_mm = args.nominal_height_mm
+            logging.info(f"Initial page height: {page_height_mm}mm")
+        
+            if args.optimize_for_dpi is not None:
+                logging.info(f"DPI optimization requested for target DPI: {args.optimize_for_dpi}")
+                # For DPI optimization, we need to calculate the required SVG scale
+                # based on the page dimensions and count
+                
+                # First, calculate what page height we need for the target DPI
+                # This is a simplified calculation - we'll refine it
+                target_dpi = args.optimize_for_dpi
+                
+                # Calculate total area needed for all pages
+                total_page_area_mm2 = 0
+                for page in pages:
+                    # Estimate page width based on aspect ratio
+                    page_width_mm = page.aspect_ratio * page_height_mm
+                    page_area_mm2 = page_width_mm * page_height_mm
+                    total_page_area_mm2 += page_area_mm2
+                
+                # Add gap area
+                page_count = len(pages)
+                estimated_pages_per_row = math.sqrt(page_count)
+                estimated_rows = page_count / estimated_pages_per_row
+                
+                avg_page_width_mm = sum(p.aspect_ratio for p in pages) / len(pages) * page_height_mm
+                gap_area_mm2 = (estimated_pages_per_row - 1) * estimated_rows * avg_page_width_mm * args.gap_mm
+                gap_area_mm2 += (estimated_rows - 1) * estimated_pages_per_row * page_height_mm * args.gap_mm
+                
+                total_needed_area_mm2 = total_page_area_mm2 + gap_area_mm2
+                
+                # Calculate current SVG area difference
+                logging.debug("Calculating boolean allowed region from shapes")
+                allowed_region = boolean_allowed_region(outer, inners)
+                current_svg_area_mm2 = allowed_region.area
+                logging.info(f"Current SVG area: {current_svg_area_mm2:.2f} mm²")
+                logging.info(f"Total needed area: {total_needed_area_mm2:.2f} mm²")
+                
+                # Calculate required scale factor for SVG shapes
+                if current_svg_area_mm2 > 0:
+                    # Add extra area buffer for large page counts to ensure all pages fit
+                    if page_count > 1000:
+                        area_buffer = 1.3  # 30% extra area for packing inefficiencies
+                    elif page_count > 500:
+                        area_buffer = 1.2  # 20% extra area
+                    else:
+                        area_buffer = 1.1  # 10% extra area
+                    
+                    required_scale = math.sqrt((total_needed_area_mm2 * area_buffer) / current_svg_area_mm2)
+                    logging.info(f"Required scale factor: {required_scale:.4f} (includes {area_buffer:.1f}x buffer for {page_count} pages)")
+                    logging.info(f"Original SVG bounds: {outer.bounds}")
+                    logging.info(f"Scaling SVG shapes by {required_scale:.4f}x to fit {page_count} pages")
+                    print(f"Auto-scaling SVG shapes by {required_scale:.4f}x to fit {page_count} pages (with packing buffer)")
+                else:
+                    required_scale = 1.0
+                    logging.warning("Current SVG area is 0, using scale factor 1.0")
+                
+                # Apply scale to SVG shapes
+                from shapely.affinity import scale
+                outer = scale(outer, required_scale, required_scale)
+                inners = [scale(inner, required_scale, required_scale) for inner in inners]
+                
+                # Reapply relative positioning after scaling (scaling can change positions)
+                if args.inner_shape and args.inner_position != "center":
+                    logging.info(f"Reapplying inner positioning after scaling: {args.inner_position}")
+                    inners = [position_inner_shape_relative(inner, outer, args.inner_position) for inner in inners]
+                
+                logging.info(f"Scaled SVG bounds: {outer.bounds}")
+                scaled_width = outer.bounds[2] - outer.bounds[0] 
+                scaled_height = outer.bounds[3] - outer.bounds[1]
+                print(f"Scaled SVG dimensions: {scaled_width:.1f} x {scaled_height:.1f} mm")
+                print(f"Tip: To avoid auto-scaling, manually scale your SVG by {required_scale:.4f}x")
+                
+                # Recalculate allowed region with scaled shapes
+                allowed_region = boolean_allowed_region(outer, inners)
+                
+                # Now calculate optimal page size for the scaled region
+                page_height_mm = calculate_optimal_page_size(
+                    allowed_region, pages, target_dpi, args.gap_mm,
+                    min_page_height_mm=1.0, max_page_height_mm=50.0, max_canvas_pixels=args.max_canvas_pixels
+                )
+        
+            # Create allowed region (if not already done in DPI optimization)
+            if args.optimize_for_dpi is None:
+                allowed_region = boolean_allowed_region(outer, inners)
+            
+            # Plan layout
+            placements = plan_layout_any_shape(
+                pages=pages,
+                allowed_region_mm=allowed_region,
+                nominal_height_mm=page_height_mm,
+                gap_mm=args.gap_mm,
+                orientation=args.orientation,
+                scale_min=args.scale_min,
+                scale_max=args.scale_max,
+                streamline_step_mm=args.streamline_step_mm,
+                max_streamlines=args.max_streamlines,
+                optimize_for_dpi=None,  # Already handled above
+                max_canvas_pixels=args.max_canvas_pixels,
+            )
     
-    # Create allowed region (if not already done in DPI optimization)
-    if args.optimize_for_dpi is None:
-        allowed_region = boolean_allowed_region(outer, inners)
-    
-    # Plan layout
+    # Layout planning complete (done in both approaches above)
     try:
-        logging.info("Planning layout with current parameters")
-        logging.debug(f"Layout params - height: {page_height_mm}mm, gap: {args.gap_mm}mm, orientation: {args.orientation}")
-        
-        placements = plan_layout_any_shape(
-            pages=pages,
-            allowed_region_mm=allowed_region,
-            nominal_height_mm=page_height_mm,
-            gap_mm=args.gap_mm,
-            orientation=args.orientation,
-            scale_min=args.scale_min,
-            scale_max=args.scale_max,
-            streamline_step_mm=args.streamline_step_mm,
-            max_streamlines=args.max_streamlines,
-            optimize_for_dpi=None,  # Already handled above
-            max_canvas_pixels=args.max_canvas_pixels,
-        )
         
         logging.info(f"Generated {len(placements)} placements")
     except Exception as e:
@@ -243,6 +347,14 @@ def cli_compose(args: argparse.Namespace) -> int:
         logging.info("Starting raster composition")
         logging.debug(f"Composition params - DPI: {dpi}, canvas: {width_mm:.2f}x{height_mm:.2f}mm")
         
+        # Get page margins from CLI arguments
+        page_margins_mm = (
+            args.page_margin_left_mm,
+            args.page_margin_top_mm,
+            args.page_margin_right_mm,
+            args.page_margin_bottom_mm
+        )
+        
         raster = compose_raster_any_shape(
             placements=placements,
             doc_registry=docs,
@@ -250,6 +362,9 @@ def cli_compose(args: argparse.Namespace) -> int:
             canvas_width_mm=width_mm,
             canvas_height_mm=height_mm,
             origin_center=True,
+            page_margins_mm=page_margins_mm,
+            standard_page_width_px=args.standard_page_width_px,
+            standard_page_height_px=args.standard_page_height_px,
         )
         
         logging.info(f"Raster composition complete. Image size: {raster.width}x{raster.height} pixels")
@@ -303,6 +418,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--input", action="append", required=True, help="Input PDF path (repeatable)")
     c.add_argument("--outer-shape", required=True, help="SVG path/polygon file for outer constraint")
     c.add_argument("--inner-shape", action="append", help="SVG path/polygon file(s) for inner keep-outs (repeatable)")
+    c.add_argument("--inner-position", choices=["center", "top-left", "top-center", "top-right", "middle-left", "middle-right", "bottom-left", "bottom-center", "bottom-right"], default="center", help="Position inner shape relative to outer shape (default: center)")
     c.add_argument("--output", help="Output PDF proof path")
     c.add_argument("--export-tiff", help="Optional TIFF output path")
 
@@ -326,6 +442,24 @@ def build_parser() -> argparse.ArgumentParser:
     # Canvas controls
     c.add_argument("--canvas-margin-mm", type=float, default=5.0, help="Extra margin around outer bounds (mm)")
     c.add_argument("--canvas-bin-mm", type=float, help="Round canvas dimensions to multiples of this value (mm)")
+    
+    # Page margins (crop PDF pages)
+    c.add_argument("--page-margin-left-mm", type=float, default=12.7, help="Left margin (gutter) to crop from PDF pages (mm, default: 12.7 = 0.5\")")
+    c.add_argument("--page-margin-top-mm", type=float, default=6.35, help="Top margin to crop from PDF pages (mm, default: 6.35 = 0.25\")")
+    c.add_argument("--page-margin-right-mm", type=float, default=6.35, help="Right margin to crop from PDF pages (mm, default: 6.35 = 0.25\")")
+    c.add_argument("--page-margin-bottom-mm", type=float, default=6.35, help="Bottom margin to crop from PDF pages (mm, default: 6.35 = 0.25\")")
+    
+    # Standard page dimensions (pixel-based processing)
+    c.add_argument("--standard-page-width-px", type=int, default=1700, help="Standard page width in pixels (default: 1700)")
+    c.add_argument("--standard-page-height-px", type=int, default=2200, help="Standard page height in pixels (default: 2200)")
+    c.add_argument("--gap-px", type=int, default=50, help="Gap between pages in pixels (default: 50)")
+    c.add_argument("--pixel-first", action="store_true", help="Use pixel-first layout approach (calculates exact canvas size needed)")
+    
+    # Advanced packing options
+    c.add_argument("--use-optimized-packing", action="store_true", help="Use advanced optimized packing algorithm for better space utilization")
+    c.add_argument("--packing-flexibility", type=float, default=0.1, help="Allow page size variation for better packing (0.0-1.0, default: 0.1)")
+    c.add_argument("--adaptive-sizing", action="store_true", help="Automatically adjust page sizes to achieve target fill ratio")
+    c.add_argument("--target-fill-ratio", type=float, default=0.85, help="Target space utilization ratio for adaptive sizing (default: 0.85)")
 
     c.set_defaults(func=cli_compose)
 

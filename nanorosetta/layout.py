@@ -45,8 +45,8 @@ class Placement:
 def calculate_safe_page_dimensions(
     page_count: int,
     target_dpi: int,
-    max_canvas_pixels: int = 100_000_000,  # 100M pixels max
-    min_page_height_mm: float = 1.0,
+    max_canvas_pixels: int = 200_000_000,  # 200M pixels max for large layouts
+    min_page_height_mm: float = 0.2,  # Very small but readable pages for 1000+ pages
     max_page_height_mm: float = 50.0,
 ) -> float:
     """
@@ -62,20 +62,28 @@ def calculate_safe_page_dimensions(
     Returns:
         Safe page height in mm
     """
+    # For large page counts like 1,034, use more aggressive scaling
     # Estimate canvas area needed (assuming roughly square layout)
     estimated_canvas_side_pixels = math.sqrt(max_canvas_pixels)
     
-    # Convert to mm
+    # Convert to mm - maintain target DPI for quality
     canvas_side_mm = estimated_canvas_side_pixels / (target_dpi / 25.4)
     
     # Estimate how many pages can fit in this area
     # Assume pages are roughly 1:1.4 aspect ratio (A4-like)
     avg_aspect_ratio = 1.4
     
-    # Calculate optimal page size to fit all pages
-    # This is a simplified calculation - in practice, layout algorithm will optimize
-    estimated_pages_per_row = math.sqrt(page_count * avg_aspect_ratio)
-    estimated_rows = page_count / estimated_pages_per_row
+    # For very large page counts, optimize the grid layout more aggressively
+    if page_count > 1000:
+        # Use a much more rectangular grid for better space utilization
+        estimated_pages_per_row = math.sqrt(page_count * avg_aspect_ratio * 2.0)
+        estimated_rows = page_count / estimated_pages_per_row
+        logging.info(f"Optimizing for {page_count} pages: ~{estimated_pages_per_row:.0f} cols × {estimated_rows:.0f} rows")
+    else:
+        # Calculate optimal page size to fit all pages
+        # This is a simplified calculation - in practice, layout algorithm will optimize
+        estimated_pages_per_row = math.sqrt(page_count * avg_aspect_ratio)
+        estimated_rows = page_count / estimated_pages_per_row
     
     if estimated_pages_per_row > 0 and estimated_rows > 0:
         # Calculate page height that fits in the canvas
@@ -176,6 +184,7 @@ def calculate_optimal_page_size(
     
     # For large page counts, use safe calculation
     if len(pages) > 500:
+        logging.info(f"Large page count detected ({len(pages)} pages), using safe scaling calculation")
         return calculate_safe_page_dimensions(
             len(pages), dpi, max_canvas_pixels, min_page_height_mm, max_page_height_mm
         )

@@ -145,6 +145,79 @@ def parse_svg_path(svg_path: str) -> MultiPolygon:
                         f"Please ensure the file is a valid SVG with shape elements.")
 
 
+def position_inner_shape_relative(
+    inner: MultiPolygon, 
+    outer: MultiPolygon, 
+    position: str = "center"
+) -> MultiPolygon:
+    """
+    Position inner shape relative to outer shape.
+    
+    Args:
+        inner: Inner shape to position
+        outer: Outer shape to position relative to
+        position: Where to place inner shape. Options:
+                 "center" (default), "top-left", "top-center", "top-right",
+                 "middle-left", "middle-right", "bottom-left", "bottom-center", "bottom-right"
+    
+    Returns:
+        Repositioned inner shape
+    """
+    from shapely.affinity import translate
+    
+    # Get bounds
+    outer_bounds = outer.bounds  # (minx, miny, maxx, maxy)
+    inner_bounds = inner.bounds
+    
+    outer_width = outer_bounds[2] - outer_bounds[0]
+    outer_height = outer_bounds[3] - outer_bounds[1] 
+    outer_center_x = outer_bounds[0] + outer_width / 2
+    outer_center_y = outer_bounds[1] + outer_height / 2
+    
+    inner_width = inner_bounds[2] - inner_bounds[0]
+    inner_height = inner_bounds[3] - inner_bounds[1]
+    inner_center_x = inner_bounds[0] + inner_width / 2
+    inner_center_y = inner_bounds[1] + inner_height / 2
+    
+    # Calculate target position based on position parameter
+    if position == "center":
+        target_x = outer_center_x
+        target_y = outer_center_y
+    elif position == "top-left":
+        target_x = outer_bounds[0] + inner_width / 2
+        target_y = outer_bounds[3] - inner_height / 2
+    elif position == "top-center":
+        target_x = outer_center_x
+        target_y = outer_bounds[3] - inner_height / 2
+    elif position == "top-right":
+        target_x = outer_bounds[2] - inner_width / 2
+        target_y = outer_bounds[3] - inner_height / 2
+    elif position == "middle-left":
+        target_x = outer_bounds[0] + inner_width / 2
+        target_y = outer_center_y
+    elif position == "middle-right":
+        target_x = outer_bounds[2] - inner_width / 2
+        target_y = outer_center_y
+    elif position == "bottom-left":
+        target_x = outer_bounds[0] + inner_width / 2
+        target_y = outer_bounds[1] + inner_height / 2
+    elif position == "bottom-center":
+        target_x = outer_center_x
+        target_y = outer_bounds[1] + inner_height / 2
+    elif position == "bottom-right":
+        target_x = outer_bounds[2] - inner_width / 2
+        target_y = outer_bounds[1] + inner_height / 2
+    else:
+        raise ValueError(f"Unknown position: {position}")
+    
+    # Calculate translation needed
+    dx = target_x - inner_center_x
+    dy = target_y - inner_center_y
+    
+    # Apply translation
+    return translate(inner, dx, dy)
+
+
 def boolean_allowed_region(outer: MultiPolygon, inners: List[MultiPolygon]) -> MultiPolygon:
     """Create allowed region by subtracting inner shapes from outer shape."""
     if outer.is_empty:

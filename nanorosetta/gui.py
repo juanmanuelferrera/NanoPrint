@@ -68,6 +68,12 @@ class NanoPrintGUI(tk.Tk):
         self.canvas_margin_var = tk.DoubleVar(value=5.0)
         self.canvas_bin_var = tk.DoubleVar(value=0.0)
         self.target_mb_var = tk.DoubleVar(value=900.0)
+        
+        # Page margins in mm - left, top, right, bottom
+        self.page_margin_left_var = tk.DoubleVar(value=12.7)  # 0.5" = 12.7mm gutter
+        self.page_margin_top_var = tk.DoubleVar(value=6.35)   # 0.25" = 6.35mm
+        self.page_margin_right_var = tk.DoubleVar(value=6.35) # 0.25" = 6.35mm
+        self.page_margin_bottom_var = tk.DoubleVar(value=6.35) # 0.25" = 6.35mm
         self.tiff_mode_var = tk.StringVar(value="bilevel")
         self.tiff_comp_var = tk.StringVar(value="lzw")
         self.tiff_dpi_var = tk.IntVar(value=1200)
@@ -111,6 +117,19 @@ class NanoPrintGUI(tk.Tk):
         row += 1
         ttk.Label(frm, text="Canvas Bin (mm)").grid(row=row, column=0, sticky=tk.W, **pad)
         ttk.Entry(frm, textvariable=self.canvas_bin_var, width=10).grid(row=row, column=1, sticky=tk.W, **pad)
+
+        # Page margins section
+        row += 1
+        ttk.Label(frm, text="Page Margin Left (mm)").grid(row=row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.page_margin_left_var, width=10).grid(row=row, column=1, sticky=tk.W, **pad)
+        ttk.Label(frm, text="Page Margin Top (mm)").grid(row=row, column=2, sticky=tk.E, **pad)
+        ttk.Entry(frm, textvariable=self.page_margin_top_var, width=10).grid(row=row, column=3, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Label(frm, text="Page Margin Right (mm)").grid(row=row, column=0, sticky=tk.W, **pad)
+        ttk.Entry(frm, textvariable=self.page_margin_right_var, width=10).grid(row=row, column=1, sticky=tk.W, **pad)
+        ttk.Label(frm, text="Page Margin Bottom (mm)").grid(row=row, column=2, sticky=tk.E, **pad)
+        ttk.Entry(frm, textvariable=self.page_margin_bottom_var, width=10).grid(row=row, column=3, sticky=tk.W, **pad)
 
         row += 1
         ttk.Label(frm, text="Output PDF Proof").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -221,6 +240,11 @@ class NanoPrintGUI(tk.Tk):
         self.tiff_dpi_var.set(1200)
         self.optimize_dpi_var.set(0)
         self.max_canvas_pixels_var.set(100_000_000)
+        # Reset page margins to default values
+        self.page_margin_left_var.set(12.7)
+        self.page_margin_top_var.set(6.35)
+        self.page_margin_right_var.set(6.35)
+        self.page_margin_bottom_var.set(6.35)
         self.log.delete("1.0", tk.END)
         self.progress.config(text="Idle")
         self._log("Cleared all selections and reset to defaults")
@@ -363,6 +387,14 @@ class NanoPrintGUI(tk.Tk):
             self.logger.info(f"Starting render: {width_mm:.2f}x{height_mm:.2f}mm at {dpi} DPI")
             self.logger.debug(f"Number of placements: {len(placements)}")
             try:
+                # Get page margins from GUI
+                page_margins_mm = (
+                    self.page_margin_left_var.get(),
+                    self.page_margin_top_var.get(),
+                    self.page_margin_right_var.get(),
+                    self.page_margin_bottom_var.get()
+                )
+                
                 raster = compose_raster_any_shape(
                     placements=placements,
                     doc_registry=docs,
@@ -370,6 +402,7 @@ class NanoPrintGUI(tk.Tk):
                     canvas_width_mm=width_mm,
                     canvas_height_mm=height_mm,
                     origin_center=True,
+                    page_margins_mm=page_margins_mm,
                 )
                 self.logger.debug(f"Render successful, raster size: {raster.size}")
             except Exception as render_error:
