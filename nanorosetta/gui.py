@@ -8,7 +8,7 @@ from typing import List
 
 import fitz  # PyMuPDF
 
-from .geometry import parse_svg_path, boolean_allowed_region
+from .geometry import parse_svg_path, parse_combined_svg, boolean_allowed_region
 from .layout import PageSpec, plan_layout_any_shape
 from .render import (
     compose_raster_any_shape,
@@ -39,6 +39,10 @@ class NanoPrintGUI(tk.Tk):
         self.inner_shapes: List[str] = []
         self.output_pdf_var = tk.StringVar()
         self.export_tiff_var = tk.StringVar()
+        
+        # Combined SVG options
+        self.auto_detect_inner_var = tk.BooleanVar(value=False)
+        self.min_inner_area_ratio_var = tk.DoubleVar(value=0.01)
 
         row = 0
         ttk.Label(frm, text="Input PDFs").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -59,6 +63,16 @@ class NanoPrintGUI(tk.Tk):
         ttk.Button(frm, text="Clear Inners", command=self._clear_inners).grid(row=row, column=2, sticky=tk.W, **pad)
         self.inner_list = tk.Listbox(frm, height=3)
         self.inner_list.grid(row=row, column=3, columnspan=2, sticky=tk.EW, **pad)
+        
+        # Combined SVG option
+        row += 1
+        self.auto_detect_checkbox = ttk.Checkbutton(frm, text="Auto-detect inner shapes from outer SVG", 
+                                                   variable=self.auto_detect_inner_var,
+                                                   command=self._on_auto_detect_changed)
+        self.auto_detect_checkbox.grid(row=row, column=0, columnspan=3, sticky=tk.W, **pad)
+        
+        ttk.Label(frm, text="Min area ratio:").grid(row=row, column=3, sticky=tk.E, **pad)
+        ttk.Entry(frm, textvariable=self.min_inner_area_ratio_var, width=8).grid(row=row, column=4, sticky=tk.W, **pad)
 
         # Options
         row += 1
@@ -201,6 +215,17 @@ class NanoPrintGUI(tk.Tk):
         self.inner_shapes = []
         self.inner_list.delete(0, tk.END)
         self._log("Cleared inner SVG selections")
+    
+    def _on_auto_detect_changed(self):
+        """Handle auto-detect checkbox changes."""
+        if self.auto_detect_inner_var.get():
+            # Disable inner shape selection when auto-detect is enabled
+            self.inner_list.config(state=tk.DISABLED)
+            self._log("Auto-detect enabled: inner shapes will be detected from outer SVG")
+        else:
+            # Re-enable inner shape selection
+            self.inner_list.config(state=tk.NORMAL)
+            self._log("Auto-detect disabled: manual inner shape selection enabled")
 
     def _choose_output_pdf(self) -> None:
         p = filedialog.asksaveasfilename(title="Save PDF proof", defaultextension=".pdf", filetypes=[("PDF","*.pdf")])
@@ -275,11 +300,19 @@ class NanoPrintGUI(tk.Tk):
                     r = d.load_page(i).rect
                     pages.append(PageSpec(doc_index=doc_idx, page_index=i, width_pt=r.width, height_pt=r.height))
 
-            # Shapes and region
-            self.logger.debug(f"Parsing outer SVG: {self.outer_shape_var.get()}")
-            outer = parse_svg_path(self.outer_shape_var.get())
-            self.logger.debug(f"Parsing {len(self.inner_shapes)} inner SVGs")
-            inners = [parse_svg_path(p) for p in self.inner_shapes]
+            # Shapes and region - support both combined and separate SVG approaches
+            if self.auto_detect_inner_var.get():
+                # Use combined SVG auto-detection
+                self.logger.debug(f"Auto-detecting shapes in: {self.outer_shape_var.get()}")
+                outer, inners = parse_combined_svg(self.outer_shape_var.get(), self.min_inner_area_ratio_var.get())
+                self.logger.debug(f"Auto-detected: 1 outer shape, {len(inners)} inner shapes")
+            else:
+                # Traditional separate file approach
+                self.logger.debug(f"Parsing outer SVG: {self.outer_shape_var.get()}")
+                outer = parse_svg_path(self.outer_shape_var.get())
+                self.logger.debug(f"Parsing {len(self.inner_shapes)} inner SVGs")
+                inners = [parse_svg_path(p) for p in self.inner_shapes]
+            
             allowed = boolean_allowed_region(outer, inners)
             self.logger.debug(f"Allowed region bounds: {allowed.bounds}")
             if allowed.is_empty:
@@ -417,9 +450,9 @@ class NanoPrintGUI(tk.Tk):
             if self.export_tiff_var.get():
                 try:
                     if self.tiff_mode_var.get() == "bilevel":
-                        save_tiff_1bit(raster, self.export_tiff_var.get(), dpi, compression=self.tiff_comp_var.get())
+                        save_tiff_1bit(raster, self.export_tiff_var.get(), compression=self.tiff_comp_var.get())
                     else:
-                        save_tiff_gray(raster, self.export_tiff_var.get(), dpi, compression=self.tiff_comp_var.get())
+                        save_tiff_gray(raster, self.export_tiff_var.get(), compression=self.tiff_comp_var.get())
                     self._log(f"Wrote TIFF: {self.export_tiff_var.get()}")
                 except Exception as e:
                     error_msg = f"Error saving TIFF: {e}\n\nSuggestions:\n"
