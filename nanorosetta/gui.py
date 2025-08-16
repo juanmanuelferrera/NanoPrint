@@ -649,9 +649,9 @@ class NanoPrintGUI(tk.Tk):
             if self.export_tiff_var.get():
                 try:
                     if self.tiff_mode_var.get() == "bilevel":
-                        save_tiff_1bit(raster, self.export_tiff_var.get(), compression=self.tiff_comp_var.get())
+                        save_tiff_1bit(raster, self.export_tiff_var.get(), dpi, compression=self.tiff_comp_var.get())
                     else:
-                        save_tiff_gray(raster, self.export_tiff_var.get(), compression=self.tiff_comp_var.get())
+                        save_tiff_gray(raster, self.export_tiff_var.get(), dpi, compression=self.tiff_comp_var.get())
                     self._log(f"Wrote TIFF: {self.export_tiff_var.get()}")
                 except Exception as e:
                     error_msg = f"Error saving TIFF: {e}\n\nSuggestions:\n"

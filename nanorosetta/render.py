@@ -233,32 +233,28 @@ def compute_dpi_for_target_mb(width_mm: float, height_mm: float, target_mb: floa
     return int(max(50, round(dpi)))  # Minimum 50 DPI
 
 
-def save_tiff_1bit(img: Image.Image, path: str, compression: Optional[str] = None) -> None:
+def save_tiff_1bit(img: Image.Image, path: str, dpi: int, compression: Optional[str] = None) -> None:
     img_1 = img.convert("1")
-    # Fixed DPI metadata at 200 DPI
-    fixed_dpi = 200
     if compression is None or compression == "none":
-        img_1.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
+        img_1.save(path, format="TIFF", dpi=(dpi, dpi))
     elif compression == "deflate":
-        img_1.save(path, format="TIFF", compression="tiff_deflate", dpi=(fixed_dpi, fixed_dpi))
+        img_1.save(path, format="TIFF", compression="tiff_deflate", dpi=(dpi, dpi))
     elif compression == "lzw":
-        img_1.save(path, format="TIFF", compression="tiff_lzw", dpi=(fixed_dpi, fixed_dpi))
+        img_1.save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi))
     else:
-        img_1.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
+        img_1.save(path, format="TIFF", dpi=(dpi, dpi))
 
 
-def save_tiff_gray(img: Image.Image, path: str, compression: Optional[str] = None) -> None:
+def save_tiff_gray(img: Image.Image, path: str, dpi: int, compression: Optional[str] = None) -> None:
     img_g = img.convert("L")
-    # Fixed DPI metadata at 200 DPI
-    fixed_dpi = 200
     if compression is None or compression == "none":
-        img_g.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
+        img_g.save(path, format="TIFF", dpi=(dpi, dpi))
     elif compression == "deflate":
-        img_g.save(path, format="TIFF", compression="tiff_deflate", dpi=(fixed_dpi, fixed_dpi))
+        img_g.save(path, format="TIFF", compression="tiff_deflate", dpi=(dpi, dpi))
     elif compression == "lzw":
-        img_g.save(path, format="TIFF", compression="tiff_lzw", dpi=(fixed_dpi, fixed_dpi))
+        img_g.save(path, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi))
     else:
-        img_g.save(path, format="TIFF", dpi=(fixed_dpi, fixed_dpi))
+        img_g.save(path, format="TIFF", dpi=(dpi, dpi))
 
 
 def save_pdf_proof(img: Image.Image, path: str, width_mm: float, height_mm: float) -> None:
