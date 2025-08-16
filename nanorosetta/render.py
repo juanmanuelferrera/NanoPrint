@@ -268,8 +268,8 @@ def save_pdf_proof(img: Image.Image, path: str, width_mm: float, height_mm: floa
     page = doc.new_page(width=width_pt, height=height_pt)
 
     # Downsample large images for PDF proof to prevent PyMuPDF overflow
-    # PDF proof is just for preview, doesn't need full resolution
-    max_dimension = 8000  # Conservative limit for PyMuPDF
+    # Use higher limit to maintain readability while avoiding overflow
+    max_dimension = 20000  # Increased from 8000 for better quality
     if img.width > max_dimension or img.height > max_dimension:
         scale_factor = min(max_dimension / img.width, max_dimension / img.height)
         new_width = int(img.width * scale_factor)

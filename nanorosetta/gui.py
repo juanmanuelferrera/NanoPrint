@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -47,10 +48,11 @@ class NanoPrintGUI(tk.Tk):
         self.min_inner_area_ratio_var = tk.DoubleVar(value=0.01)
         
         # Advanced packing options
-        self.use_optimized_packing_var = tk.BooleanVar(value=True)  # Default to True for better results
+        self.use_optimized_packing_var = tk.BooleanVar(value=False)  # Changed to False - optimized packing makes pages too small
         self.adaptive_sizing_var = tk.BooleanVar(value=False)
         self.target_fill_ratio_var = tk.DoubleVar(value=0.85)
-        self.pixel_first_var = tk.BooleanVar(value=False)
+        self.pixel_first_var = tk.BooleanVar(value=True)  # Stay in pixel space
+        self.auto_scale_svg_var = tk.BooleanVar(value=True)  # Auto-scale SVG to fit all pages
 
         row = 0
         ttk.Label(frm, text="Input PDFs").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -158,7 +160,11 @@ class NanoPrintGUI(tk.Tk):
         ttk.Label(frm, text="ADVANCED PACKING", font=("TkDefaultFont", 9, "bold")).grid(row=row, column=0, columnspan=2, sticky=tk.W, **pad)
         
         row += 1
-        ttk.Checkbutton(frm, text="Use optimized packing (recommended for 500+ pages)", 
+        ttk.Checkbutton(frm, text="Auto-scale SVG to fit all pages (recommended)", 
+                       variable=self.auto_scale_svg_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Checkbutton(frm, text="Use optimized packing (WARNING: may make pages very small)", 
                        variable=self.use_optimized_packing_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
         
         row += 1
@@ -170,15 +176,17 @@ class NanoPrintGUI(tk.Tk):
         self.target_fill_entry = ttk.Entry(frm, textvariable=self.target_fill_ratio_var, width=8)
         self.target_fill_entry.grid(row=row, column=4, sticky=tk.W, **pad)
         
-        row += 1
-        ttk.Checkbutton(frm, text="Pixel-first layout (for consistent quality)", 
-                       variable=self.pixel_first_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
+        # Pixel-first is now always enabled
+        # row += 1
+        # ttk.Checkbutton(frm, text="Pixel-first layout (for consistent quality)", 
+        #                variable=self.pixel_first_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
 
-        row += 1
-        ttk.Label(frm, text="Output PDF Proof").grid(row=row, column=0, sticky=tk.W, **pad)
-        ttk.Entry(frm, textvariable=self.output_pdf_var).grid(row=row, column=1, columnspan=2, sticky=tk.EW, **pad)
-        ttk.Button(frm, text="Browse", command=self._choose_output_pdf).grid(row=row, column=3, sticky=tk.W, **pad)
-        ttk.Button(frm, text="Clear", command=self._clear_output_pdf).grid(row=row, column=4, sticky=tk.W, **pad)
+        # PDF proof output removed for better performance and reliability
+        # row += 1
+        # ttk.Label(frm, text="Output PDF Proof").grid(row=row, column=0, sticky=tk.W, **pad)
+        # ttk.Entry(frm, textvariable=self.output_pdf_var).grid(row=row, column=1, columnspan=2, sticky=tk.EW, **pad)
+        # ttk.Button(frm, text="Browse", command=self._choose_output_pdf).grid(row=row, column=3, sticky=tk.W, **pad)
+        # ttk.Button(frm, text="Clear", command=self._clear_output_pdf).grid(row=row, column=4, sticky=tk.W, **pad)
 
         row += 1
         ttk.Label(frm, text="Export TIFF").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -325,8 +333,8 @@ class NanoPrintGUI(tk.Tk):
                 raise ValueError("Please add at least one input PDF.")
             if not self.outer_shape_var.get():
                 raise ValueError("Please select an outer SVG.")
-            if not self.export_tiff_var.get() and not self.output_pdf_var.get():
-                raise ValueError("Please set an output (TIFF and/or PDF proof).")
+            if not self.export_tiff_var.get():
+                raise ValueError("Please set a TIFF output file.")
 
             # Collect pages
             docs: List[fitz.Document] = []
@@ -361,41 +369,63 @@ class NanoPrintGUI(tk.Tk):
             
             max_canvas_pixels = int(self.max_canvas_pixels_var.get())
             
-            # Choose layout algorithm based on GUI settings
-            if self.pixel_first_var.get():
-                # Pixel-first approach
-                self.logger.debug("Using pixel-first layout approach")
+            # Auto-scale SVG if enabled
+            if self.auto_scale_svg_var.get():
+                self.logger.info("Auto-scaling SVG to fit all pages...")
                 
-                # Detect SVG aspect ratio for square canvas generation
-                outer_bounds = outer.bounds
-                current_width_mm = outer_bounds[2] - outer_bounds[0]
-                current_height_mm = outer_bounds[3] - outer_bounds[1]
-                svg_aspect_ratio = current_width_mm / current_height_mm
+                # Calculate total area needed for all pages at standard size
+                standard_page_area = (1700 * 2200) / (25.4 * 25.4)  # mm²
+                total_area_needed = len(pages) * standard_page_area * 1.2  # 20% buffer
                 
-                # Calculate exact pixel dimensions needed
-                required_width_px, required_height_px = calculate_required_region_size_pixels(
-                    len(pages), 1700, 2200, 50, target_aspect_ratio=svg_aspect_ratio
-                )
+                # Get current SVG area
+                current_area = allowed.area
                 
-                # Calculate and apply SVG scaling
-                scale_factor = calculate_svg_scale_factor(
-                    current_width_mm, current_height_mm, required_width_px, required_height_px
-                )
-                
-                self.logger.debug(f"Pixel-first scaling: {scale_factor:.4f}x to create {required_width_px:,}×{required_height_px:,} pixel canvas")
-                
-                # Apply scaling to shapes
-                from shapely.affinity import scale
-                outer = scale(outer, scale_factor, scale_factor)
-                inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
-                allowed = boolean_allowed_region(outer, inners)
-                
-                # Use pixel layout
-                placements = calculate_pixel_layout(
-                    pages, allowed.bounds, 1700, 2200, 50
-                )
+                if current_area > 0 and total_area_needed > current_area:
+                    # Need to scale up
+                    scale_factor = math.sqrt(total_area_needed / current_area)
+                    self.logger.info(f"Scaling SVG by {scale_factor:.2f}x to fit {len(pages)} pages")
+                    
+                    from shapely.affinity import scale
+                    outer = scale(outer, scale_factor, scale_factor)
+                    inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
+                    allowed = boolean_allowed_region(outer, inners)
+                    
+                    self._log(f"SVG auto-scaled by {scale_factor:.2f}x to fit all pages\n")
             
-            elif self.use_optimized_packing_var.get() or self.adaptive_sizing_var.get():
+            # Always use pixel-first approach - stay in pixel space after conversion
+            self.logger.debug("Using pixel-first layout approach (staying in pixel space)")
+            
+            # Detect SVG aspect ratio for square canvas generation
+            outer_bounds = outer.bounds
+            current_width_mm = outer_bounds[2] - outer_bounds[0]
+            current_height_mm = outer_bounds[3] - outer_bounds[1]
+            svg_aspect_ratio = current_width_mm / current_height_mm
+            
+            # Calculate exact pixel dimensions needed
+            required_width_px, required_height_px = calculate_required_region_size_pixels(
+                len(pages), 1700, 2200, 50, target_aspect_ratio=svg_aspect_ratio
+            )
+            
+            # Calculate and apply SVG scaling
+            scale_factor = calculate_svg_scale_factor(
+                current_width_mm, current_height_mm, required_width_px, required_height_px
+            )
+            
+            self.logger.debug(f"Pixel-first scaling: {scale_factor:.4f}x to create {required_width_px:,}×{required_height_px:,} pixel canvas")
+            
+            # Apply scaling to shapes
+            from shapely.affinity import scale
+            outer = scale(outer, scale_factor, scale_factor)
+            inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
+            allowed = boolean_allowed_region(outer, inners)
+            
+            # Use pixel layout - stay in pixel space from here on
+            placements = calculate_pixel_layout(
+                pages, allowed.bounds, 1700, 2200, 50
+            )
+            
+            # Skip the old mm-based approaches
+            if False and (self.use_optimized_packing_var.get() or self.adaptive_sizing_var.get()):
                 # Advanced packing approaches
                 self.logger.debug("Using optimized packing approach")
                 
@@ -536,10 +566,10 @@ class NanoPrintGUI(tk.Tk):
                 self.logger.error(f"Render failed: {type(render_error).__name__}: {render_error}")
                 raise
 
-            # Save outputs
-            if self.output_pdf_var.get():
-                save_pdf_proof(raster, self.output_pdf_var.get(), width_mm, height_mm)
-                self._log(f"Wrote PDF proof: {self.output_pdf_var.get()}")
+            # Save outputs - PDF proof skipped for better performance and reliability
+            # if self.output_pdf_var.get():
+            #     save_pdf_proof(raster, self.output_pdf_var.get(), width_mm, height_mm)
+            #     self._log(f"Wrote PDF proof: {self.output_pdf_var.get()}")
 
             if self.export_tiff_var.get():
                 try:
