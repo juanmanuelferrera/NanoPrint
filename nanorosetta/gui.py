@@ -398,10 +398,12 @@ class NanoPrintGUI(tk.Tk):
             if self.use_simple_bins_var.get():
                 # Simple bin mode - skip SVG parsing
                 self.logger.debug("Using simple bin mode - no SVG parsing needed")
+                dpi = int(self.tiff_dpi_var.get())
                 placements, width_mm, height_mm = simple_bin_layout(
                     pages, 
                     int(self.bin_width_var.get()), 
-                    int(self.bin_height_var.get())
+                    int(self.bin_height_var.get()),
+                    dpi
                 )
             else:
                 # Traditional SVG-based approach

@@ -124,7 +124,7 @@ def pack_bins_in_circle(pages: List[PageSpec], bin_width: int, bin_height: int) 
     return bin_placements, circle_radius
 
 
-def simple_bin_layout(pages: List[PageSpec], bin_width: int, bin_height: int) -> Tuple[List[Placement], float, float]:
+def simple_bin_layout(pages: List[PageSpec], bin_width: int, bin_height: int, dpi: int = 300) -> Tuple[List[Placement], float, float]:
     """
     Create layout using simple bin approach with calculated circle envelope.
     
@@ -143,14 +143,15 @@ def simple_bin_layout(pages: List[PageSpec], bin_width: int, bin_height: int) ->
     
     # Convert bin placements to standard Placement objects
     placements = []
-    for bin_placement in bin_placements:
+    for i, bin_placement in enumerate(bin_placements):
         # Convert pixel coordinates to mm for compatibility with existing render system
-        center_x_mm = bin_placement.center_x * 25.4 / 300  # Assuming 300 DPI for mm conversion
-        center_y_mm = bin_placement.center_y * 25.4 / 300
-        width_mm = bin_placement.bin_width * 25.4 / 300
-        height_mm = bin_placement.bin_height * 25.4 / 300
+        center_x_mm = bin_placement.center_x * 25.4 / dpi  # Use provided DPI for mm conversion
+        center_y_mm = bin_placement.center_y * 25.4 / dpi
+        width_mm = bin_placement.bin_width * 25.4 / dpi
+        height_mm = bin_placement.bin_height * 25.4 / dpi
         
         placement = Placement(
+            page_global_index=i,  # Global index for this placement
             doc_index=bin_placement.page_spec.doc_index,
             page_index=bin_placement.page_spec.page_index,
             center_xy_mm=(center_x_mm, center_y_mm),
@@ -163,7 +164,7 @@ def simple_bin_layout(pages: List[PageSpec], bin_width: int, bin_height: int) ->
     # Calculate canvas size (circle diameter plus some margin)
     margin_px = max(bin_width, bin_height) * 0.1  # 10% margin
     canvas_size_px = (circle_radius * 2) + (margin_px * 2)
-    canvas_width_mm = canvas_size_px * 25.4 / 300  # Convert to mm
+    canvas_width_mm = canvas_size_px * 25.4 / dpi  # Convert to mm using provided DPI
     canvas_height_mm = canvas_width_mm  # Square canvas
     
     logging.info(f"Simple bin layout complete: {len(placements)} placements, "
