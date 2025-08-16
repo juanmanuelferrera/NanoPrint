@@ -253,7 +253,7 @@ def optimized_packing_layout(
     
     # Analyze inner constraints if provided
     inner_constraints = None
-    if outer_shape is not None and inner_shapes is not None:
+    if outer_shape is not None and inner_shapes is not None and len(inner_shapes) > 0:
         inner_constraints = analyze_inner_constraints(outer_shape, inner_shapes, allowed_region)
         logging.info(f"Inner constraints: {inner_constraints['constraint_type']}, "
                     f"available area: {inner_constraints['available_area_ratio']:.1%}")
