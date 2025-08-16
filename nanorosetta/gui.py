@@ -13,6 +13,7 @@ from .geometry import parse_svg_path, parse_combined_svg, boolean_allowed_region
 from .layout import PageSpec, plan_layout_any_shape
 from .optimized_packing import optimized_packing_layout, adaptive_size_packing
 from .pixel_layout import calculate_pixel_layout, calculate_required_region_size_pixels, calculate_svg_scale_factor
+from .simple_bins import simple_bin_layout
 from .render import (
     compose_raster_any_shape,
     save_pdf_proof,
@@ -53,6 +54,11 @@ class NanoPrintGUI(tk.Tk):
         self.target_fill_ratio_var = tk.DoubleVar(value=0.85)
         self.pixel_first_var = tk.BooleanVar(value=True)  # Stay in pixel space
         self.auto_scale_svg_var = tk.BooleanVar(value=True)  # Auto-scale SVG to fit all pages
+        
+        # Simple bin mode options
+        self.use_simple_bins_var = tk.BooleanVar(value=False)
+        self.bin_width_var = tk.IntVar(value=2000)
+        self.bin_height_var = tk.IntVar(value=2000)
 
         row = 0
         ttk.Label(frm, text="Input PDFs").grid(row=row, column=0, sticky=tk.W, **pad)
@@ -155,20 +161,36 @@ class NanoPrintGUI(tk.Tk):
         ttk.Label(frm, text="Page Margin Bottom (mm)").grid(row=row, column=2, sticky=tk.E, **pad)
         ttk.Entry(frm, textvariable=self.page_margin_bottom_var, width=10).grid(row=row, column=3, sticky=tk.W, **pad)
 
-        # Advanced Packing Options
+        # Layout Options
         row += 1
-        ttk.Label(frm, text="ADVANCED PACKING", font=("TkDefaultFont", 9, "bold")).grid(row=row, column=0, columnspan=2, sticky=tk.W, **pad)
+        ttk.Label(frm, text="LAYOUT OPTIONS", font=("TkDefaultFont", 9, "bold")).grid(row=row, column=0, columnspan=2, sticky=tk.W, **pad)
         
         row += 1
-        ttk.Checkbutton(frm, text="Auto-scale SVG to fit all pages (recommended)", 
+        ttk.Checkbutton(frm, text="Simple bin mode (one page per bin, calculated circle envelope)", 
+                       variable=self.use_simple_bins_var,
+                       command=self._on_simple_bins_changed).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
+        
+        row += 1
+        self.bin_width_label = ttk.Label(frm, text="Bin Width (px):")
+        self.bin_width_label.grid(row=row, column=0, sticky=tk.W, **pad)
+        self.bin_width_entry = ttk.Entry(frm, textvariable=self.bin_width_var, width=8, state=tk.DISABLED)
+        self.bin_width_entry.grid(row=row, column=1, sticky=tk.W, **pad)
+        
+        self.bin_height_label = ttk.Label(frm, text="Bin Height (px):")
+        self.bin_height_label.grid(row=row, column=2, sticky=tk.E, **pad)
+        self.bin_height_entry = ttk.Entry(frm, textvariable=self.bin_height_var, width=8, state=tk.DISABLED)
+        self.bin_height_entry.grid(row=row, column=3, sticky=tk.W, **pad)
+        
+        row += 1
+        ttk.Checkbutton(frm, text="Auto-scale SVG to fit all pages (SVG mode only)", 
                        variable=self.auto_scale_svg_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
         
         row += 1
-        ttk.Checkbutton(frm, text="Use optimized packing (WARNING: may make pages very small)", 
+        ttk.Checkbutton(frm, text="Use optimized packing (SVG mode - WARNING: may make pages very small)", 
                        variable=self.use_optimized_packing_var).grid(row=row, column=0, columnspan=4, sticky=tk.W, **pad)
         
         row += 1
-        ttk.Checkbutton(frm, text="Adaptive sizing (auto-adjust page sizes for best fit)", 
+        ttk.Checkbutton(frm, text="Adaptive sizing (SVG mode - auto-adjust page sizes for best fit)", 
                        variable=self.adaptive_sizing_var,
                        command=self._on_adaptive_sizing_changed).grid(row=row, column=0, columnspan=3, sticky=tk.W, **pad)
         
@@ -272,6 +294,19 @@ class NanoPrintGUI(tk.Tk):
         else:
             self.target_fill_entry.config(state=tk.DISABLED)
             self._log("Adaptive sizing disabled: using nominal page sizes")
+    
+    def _on_simple_bins_changed(self):
+        """Handle simple bin mode checkbox changes."""
+        if self.use_simple_bins_var.get():
+            # Enable bin size controls
+            self.bin_width_entry.config(state=tk.NORMAL)
+            self.bin_height_entry.config(state=tk.NORMAL)
+            self._log("Simple bin mode enabled: one page per bin with calculated circle envelope")
+        else:
+            # Disable bin size controls
+            self.bin_width_entry.config(state=tk.DISABLED)
+            self.bin_height_entry.config(state=tk.DISABLED)
+            self._log("Simple bin mode disabled: using SVG-based layout")
 
     def _choose_output_pdf(self) -> None:
         p = filedialog.asksaveasfilename(title="Save PDF proof", defaultextension=".pdf", filetypes=[("PDF","*.pdf")])
@@ -331,204 +366,236 @@ class NanoPrintGUI(tk.Tk):
 
             if not self.input_pdfs:
                 raise ValueError("Please add at least one input PDF.")
-            if not self.outer_shape_var.get():
-                raise ValueError("Please select an outer SVG.")
+            if not self.use_simple_bins_var.get() and not self.outer_shape_var.get():
+                raise ValueError("Please select an outer SVG or enable simple bin mode.")
             if not self.export_tiff_var.get():
                 raise ValueError("Please set a TIFF output file.")
 
-            # Collect pages
+            # Collect pages and calculate standard page size from first PDF page
             docs: List[fitz.Document] = []
             pages: List[PageSpec] = []
+            standard_page_width_px = 1700  # Default fallback
+            standard_page_height_px = 2200  # Default fallback
+            
             for doc_idx, p in enumerate(self.input_pdfs):
                 d = fitz.open(p)
                 docs.append(d)
                 for i in range(d.page_count):
                     r = d.load_page(i).rect
                     pages.append(PageSpec(doc_index=doc_idx, page_index=i, width_pt=r.width, height_pt=r.height))
-
-            # Shapes and region - support both combined and separate SVG approaches
-            if self.auto_detect_inner_var.get():
-                # Use combined SVG auto-detection
-                self.logger.debug(f"Auto-detecting shapes in: {self.outer_shape_var.get()}")
-                outer, inners = parse_combined_svg(self.outer_shape_var.get(), self.min_inner_area_ratio_var.get())
-                self.logger.debug(f"Auto-detected: 1 outer shape, {len(inners)} inner shapes")
-            else:
-                # Traditional separate file approach
-                self.logger.debug(f"Parsing outer SVG: {self.outer_shape_var.get()}")
-                outer = parse_svg_path(self.outer_shape_var.get())
-                self.logger.debug(f"Parsing {len(self.inner_shapes)} inner SVGs")
-                inners = [parse_svg_path(p) for p in self.inner_shapes]
-            
-            allowed = boolean_allowed_region(outer, inners)
-            self.logger.debug(f"Allowed region bounds: {allowed.bounds}")
-            if allowed.is_empty:
-                raise ValueError("Allowed region is empty. Check shapes.")
-
-            optimize_dpi = int(self.optimize_dpi_var.get())
-            optimize_dpi = optimize_dpi if optimize_dpi > 0 else None
-            
-            max_canvas_pixels = int(self.max_canvas_pixels_var.get())
-            
-            # Auto-scale SVG if enabled
-            if self.auto_scale_svg_var.get():
-                self.logger.info("Auto-scaling SVG to fit all pages...")
-                
-                # Calculate total area needed for all pages at standard size
-                standard_page_area = (1700 * 2200) / (25.4 * 25.4)  # mm²
-                total_area_needed = len(pages) * standard_page_area * 1.2  # 20% buffer
-                
-                # Get current SVG area
-                current_area = allowed.area
-                
-                if current_area > 0 and total_area_needed > current_area:
-                    # Need to scale up
-                    scale_factor = math.sqrt(total_area_needed / current_area)
-                    self.logger.info(f"Scaling SVG by {scale_factor:.2f}x to fit {len(pages)} pages")
                     
-                    from shapely.affinity import scale
-                    outer = scale(outer, scale_factor, scale_factor)
-                    inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
-                    allowed = boolean_allowed_region(outer, inners)
-                    
-                    self._log(f"SVG auto-scaled by {scale_factor:.2f}x to fit all pages\n")
-            
-            # Always use pixel-first approach - stay in pixel space after conversion
-            self.logger.debug("Using pixel-first layout approach (staying in pixel space)")
-            
-            # Detect SVG aspect ratio for square canvas generation
-            outer_bounds = outer.bounds
-            current_width_mm = outer_bounds[2] - outer_bounds[0]
-            current_height_mm = outer_bounds[3] - outer_bounds[1]
-            svg_aspect_ratio = current_width_mm / current_height_mm
-            
-            # Calculate exact pixel dimensions needed
-            required_width_px, required_height_px = calculate_required_region_size_pixels(
-                len(pages), 1700, 2200, 50, target_aspect_ratio=svg_aspect_ratio
-            )
-            
-            # Calculate and apply SVG scaling
-            scale_factor = calculate_svg_scale_factor(
-                current_width_mm, current_height_mm, required_width_px, required_height_px
-            )
-            
-            self.logger.debug(f"Pixel-first scaling: {scale_factor:.4f}x to create {required_width_px:,}×{required_height_px:,} pixel canvas")
-            
-            # Apply scaling to shapes
-            from shapely.affinity import scale
-            outer = scale(outer, scale_factor, scale_factor)
-            inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
-            allowed = boolean_allowed_region(outer, inners)
-            
-            # Use pixel layout - stay in pixel space from here on
-            placements = calculate_pixel_layout(
-                pages, allowed.bounds, 1700, 2200, 50
-            )
-            
-            # Skip the old mm-based approaches
-            if False and (self.use_optimized_packing_var.get() or self.adaptive_sizing_var.get()):
-                # Advanced packing approaches
-                self.logger.debug("Using optimized packing approach")
-                
-                if self.adaptive_sizing_var.get():
-                    # Adaptive sizing for optimal space utilization
-                    self.logger.debug(f"Using adaptive sizing with target fill ratio: {self.target_fill_ratio_var.get():.1%}")
-                    placements = adaptive_size_packing(
-                        pages, allowed, self.target_fill_ratio_var.get(), float(self.gap_var.get())
-                    )
-                else:
-                    # Optimized packing with current settings
-                    placements = optimized_packing_layout(
-                        pages, allowed, float(self.nominal_height_var.get()), float(self.gap_var.get()),
-                        size_flexibility=0.15,  # Allow 15% size variation for better packing
-                        prioritize_space_filling=True,
-                        outer_shape=outer,
-                        inner_shapes=inners
-                    )
-            else:
-                # Traditional layout approach
-                self.logger.debug("Using traditional layout approach")
-                placements = plan_layout_any_shape(
-                    pages=pages,
-                    allowed_region_mm=allowed,
-                    nominal_height_mm=float(self.nominal_height_var.get()),
-                    gap_mm=float(self.gap_var.get()),
-                    orientation=self.orientation_var.get(),
-                    optimize_for_dpi=optimize_dpi,
-                    max_canvas_pixels=max_canvas_pixels,
+                    # Calculate standard page pixel dimensions from first page and user DPI
+                    if doc_idx == 0 and i == 0:
+                        dpi = int(self.tiff_dpi_var.get())
+                        page_width_inches = r.width / 72.0  # Convert points to inches
+                        page_height_inches = r.height / 72.0
+                        standard_page_width_px = int(page_width_inches * dpi)
+                        standard_page_height_px = int(page_height_inches * dpi)
+                        self.logger.info(f"Calculated standard page size: {standard_page_width_px}×{standard_page_height_px}px "
+                                       f"(from {page_width_inches:.1f}×{page_height_inches:.1f}\" at {dpi} DPI)")
+
+            # Choose layout approach based on mode
+            if self.use_simple_bins_var.get():
+                # Simple bin mode - skip SVG parsing
+                self.logger.debug("Using simple bin mode - no SVG parsing needed")
+                placements, width_mm, height_mm = simple_bin_layout(
+                    pages, 
+                    int(self.bin_width_var.get()), 
+                    int(self.bin_height_var.get())
                 )
+            else:
+                # Traditional SVG-based approach
+                # Shapes and region - support both combined and separate SVG approaches
+                if self.auto_detect_inner_var.get():
+                    # Use combined SVG auto-detection
+                    self.logger.debug(f"Auto-detecting shapes in: {self.outer_shape_var.get()}")
+                    outer, inners = parse_combined_svg(self.outer_shape_var.get(), self.min_inner_area_ratio_var.get())
+                    self.logger.debug(f"Auto-detected: 1 outer shape, {len(inners)} inner shapes")
+                else:
+                    # Traditional separate file approach
+                    self.logger.debug(f"Parsing outer SVG: {self.outer_shape_var.get()}")
+                    outer = parse_svg_path(self.outer_shape_var.get())
+                    self.logger.debug(f"Parsing {len(self.inner_shapes)} inner SVGs")
+                    inners = [parse_svg_path(p) for p in self.inner_shapes]
+                
+                allowed = boolean_allowed_region(outer, inners)
+                self.logger.debug(f"Allowed region bounds: {allowed.bounds}")
+                if allowed.is_empty:
+                    raise ValueError("Allowed region is empty. Check shapes.")
+
+                optimize_dpi = int(self.optimize_dpi_var.get())
+                optimize_dpi = optimize_dpi if optimize_dpi > 0 else None
+                
+                max_canvas_pixels = int(self.max_canvas_pixels_var.get())
+                
+                # Auto-scale SVG if enabled
+                if self.auto_scale_svg_var.get():
+                    self.logger.info("Auto-scaling SVG to fit all pages...")
+                    
+                    # Calculate total area needed for all pages at standard size
+                    standard_page_area = (standard_page_width_px * standard_page_height_px) / (25.4 * 25.4)  # mm²
+                    total_area_needed = len(pages) * standard_page_area * 1.2  # 20% buffer
+                    
+                    # Get current SVG area
+                    current_area = allowed.area
+                    
+                    if current_area > 0 and total_area_needed > current_area:
+                        # Need to scale up
+                        scale_factor = math.sqrt(total_area_needed / current_area)
+                        self.logger.info(f"Scaling SVG by {scale_factor:.2f}x to fit {len(pages)} pages")
+                        
+                        from shapely.affinity import scale
+                        outer = scale(outer, scale_factor, scale_factor)
+                        inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
+                        allowed = boolean_allowed_region(outer, inners)
+                        
+                        self._log(f"SVG auto-scaled by {scale_factor:.2f}x to fit all pages\n")
+                
+                # Always use pixel-first approach - stay in pixel space after conversion
+                self.logger.debug("Using pixel-first layout approach (staying in pixel space)")
+                
+                # Detect SVG aspect ratio for square canvas generation
+                outer_bounds = outer.bounds
+                current_width_mm = outer_bounds[2] - outer_bounds[0]
+                current_height_mm = outer_bounds[3] - outer_bounds[1]
+                svg_aspect_ratio = current_width_mm / current_height_mm
+                
+                # Calculate exact pixel dimensions needed
+                required_width_px, required_height_px = calculate_required_region_size_pixels(
+                    len(pages), standard_page_width_px, standard_page_height_px, 50, target_aspect_ratio=svg_aspect_ratio
+                )
+                
+                # Calculate and apply SVG scaling
+                scale_factor = calculate_svg_scale_factor(
+                    current_width_mm, current_height_mm, required_width_px, required_height_px
+                )
+                
+                self.logger.debug(f"Pixel-first scaling: {scale_factor:.4f}x to create {required_width_px:,}×{required_height_px:,} pixel canvas")
+                
+                # Apply scaling to shapes
+                from shapely.affinity import scale
+                outer = scale(outer, scale_factor, scale_factor)
+                inners = [scale(inner, scale_factor, scale_factor) for inner in inners]
+                allowed = boolean_allowed_region(outer, inners)
+                
+                # Use pixel layout - stay in pixel space from here on
+                placements = calculate_pixel_layout(
+                    pages, allowed.bounds, standard_page_width_px, standard_page_height_px, 50
+                )
+                
+                # Skip the old mm-based approaches
+                if False and (self.use_optimized_packing_var.get() or self.adaptive_sizing_var.get()):
+                    # Advanced packing approaches
+                    self.logger.debug("Using optimized packing approach")
+                    
+                    if self.adaptive_sizing_var.get():
+                        # Adaptive sizing for optimal space utilization
+                        self.logger.debug(f"Using adaptive sizing with target fill ratio: {self.target_fill_ratio_var.get():.1%}")
+                        placements = adaptive_size_packing(
+                            pages, allowed, self.target_fill_ratio_var.get(), float(self.gap_var.get())
+                        )
+                    else:
+                        # Optimized packing with current settings
+                        placements = optimized_packing_layout(
+                            pages, allowed, float(self.nominal_height_var.get()), float(self.gap_var.get()),
+                            size_flexibility=0.15,  # Allow 15% size variation for better packing
+                            prioritize_space_filling=True,
+                            outer_shape=outer,
+                            inner_shapes=inners
+                        )
+                else:
+                    # Traditional layout approach (currently disabled in favor of pixel-first)
+                    self.logger.debug("Using traditional layout approach")
+                    placements = plan_layout_any_shape(
+                        pages=pages,
+                        allowed_region_mm=allowed,
+                        nominal_height_mm=float(self.nominal_height_var.get()),
+                        gap_mm=float(self.gap_var.get()),
+                        orientation=self.orientation_var.get(),
+                        optimize_for_dpi=optimize_dpi,
+                        max_canvas_pixels=max_canvas_pixels,
+                    )
             if not placements:
                 raise ValueError("No placements computed with current parameters.")
 
-            # Scale SVG coordinates to reasonable physical dimensions
-            minx, miny, maxx, maxy = allowed.bounds
-            svg_width = maxx - minx
-            svg_height = maxy - miny
-            
-            # Always use content-based sizing for better results
-            # Small layouts get tighter fitting, larger layouts get some extra space
-            self.logger.info(f"Using content-based canvas sizing for {len(placements)} placements")
-            if True:  # Always use content-based sizing
-                # Calculate actual content bounds from placements
-                if placements:
-                    content_minx = min(pl.center_xy_mm[0] - pl.width_mm/2 for pl in placements)
-                    content_maxx = max(pl.center_xy_mm[0] + pl.width_mm/2 for pl in placements)
-                    content_miny = min(pl.center_xy_mm[1] - pl.height_mm/2 for pl in placements)
-                    content_maxy = max(pl.center_xy_mm[1] + pl.height_mm/2 for pl in placements)
-                    
-                    content_width = content_maxx - content_minx
-                    content_height = content_maxy - content_miny
-                    
-                    self.logger.debug(f"Content bounds: ({content_minx:.1f}, {content_miny:.1f}) to ({content_maxx:.1f}, {content_maxy:.1f})")
-                    self.logger.debug(f"Content dimensions: {content_width:.1f} x {content_height:.1f} mm")
-                    self.logger.debug(f"SVG bounds: ({minx:.1f}, {miny:.1f}) to ({maxx:.1f}, {maxy:.1f})")
-                    self.logger.debug(f"SVG dimensions: {svg_width:.1f} x {svg_height:.1f} mm")
-                    
-                    # Use content size + reasonable margin instead of full SVG bounds
-                    margin = float(self.canvas_margin_var.get())
-                    width_mm = content_width + 2 * margin
-                    height_mm = content_height + 2 * margin
-                    
-                    # Ensure minimum canvas size for visibility
-                    min_canvas_mm = 20.0  # At least 20mm per dimension
-                    width_mm = max(width_mm, min_canvas_mm)
-                    height_mm = max(height_mm, min_canvas_mm)
-                    
-                    self.logger.info(f"Content-based canvas: {width_mm:.1f}x{height_mm:.1f}mm (content: {content_width:.1f}x{content_height:.1f}mm)")
-                else:
-                    # Fallback for no placements
-                    width_mm = 50.0  # Default small canvas
-                    height_mm = 50.0
-            else:
-                # For larger layouts, scale SVG coordinates to reasonable size
-                # Target maximum ~100mm for large dimension
-                max_target_mm = 100.0
-                scale_factor = min(max_target_mm / max(svg_width, svg_height), 1.0)
+            # Handle canvas sizing based on mode
+            if not self.use_simple_bins_var.get():
+                # SVG mode - calculate canvas size from SVG bounds and placements
+                minx, miny, maxx, maxy = allowed.bounds
+                svg_width = maxx - minx
+                svg_height = maxy - miny
                 
-                if scale_factor < 1.0:
-                    self.logger.info(f"Scaling SVG coordinates by {scale_factor:.3f} (from {svg_width:.1f}x{svg_height:.1f} to reasonable size)")
-                    width_mm = svg_width * scale_factor + 2 * float(self.canvas_margin_var.get())
-                    height_mm = svg_height * scale_factor + 2 * float(self.canvas_margin_var.get())
+                # Always use content-based sizing for better results
+                # Small layouts get tighter fitting, larger layouts get some extra space
+                self.logger.info(f"Using content-based canvas sizing for {len(placements)} placements")
+                if True:  # Always use content-based sizing
+                    # Calculate actual content bounds from placements
+                    if placements:
+                        content_minx = min(pl.center_xy_mm[0] - pl.width_mm/2 for pl in placements)
+                        content_maxx = max(pl.center_xy_mm[0] + pl.width_mm/2 for pl in placements)
+                        content_miny = min(pl.center_xy_mm[1] - pl.height_mm/2 for pl in placements)
+                        content_maxy = max(pl.center_xy_mm[1] + pl.height_mm/2 for pl in placements)
+                        
+                        content_width = content_maxx - content_minx
+                        content_height = content_maxy - content_miny
+                        
+                        self.logger.debug(f"Content bounds: ({content_minx:.1f}, {content_miny:.1f}) to ({content_maxx:.1f}, {content_maxy:.1f})")
+                        self.logger.debug(f"Content dimensions: {content_width:.1f} x {content_height:.1f} mm")
+                        self.logger.debug(f"SVG bounds: ({minx:.1f}, {miny:.1f}) to ({maxx:.1f}, {maxy:.1f})")
+                        self.logger.debug(f"SVG dimensions: {svg_width:.1f} x {svg_height:.1f} mm")
+                        
+                        # Use content size + reasonable margin instead of full SVG bounds
+                        margin = float(self.canvas_margin_var.get())
+                        width_mm = content_width + 2 * margin
+                        height_mm = content_height + 2 * margin
+                        
+                        # Ensure minimum canvas size for visibility
+                        min_canvas_mm = 20.0  # At least 20mm per dimension
+                        width_mm = max(width_mm, min_canvas_mm)
+                        height_mm = max(height_mm, min_canvas_mm)
+                        
+                        self.logger.info(f"Content-based canvas: {width_mm:.1f}x{height_mm:.1f}mm (content: {content_width:.1f}x{content_height:.1f}mm)")
+                    else:
+                        # Fallback for no placements
+                        width_mm = 50.0  # Default small canvas
+                        height_mm = 50.0
                 else:
-                    # SVG coordinates are already reasonable
-                    width_mm = svg_width + 2 * float(self.canvas_margin_var.get())
-                    height_mm = svg_height + 2 * float(self.canvas_margin_var.get())
+                    # For larger layouts, scale SVG coordinates to reasonable size
+                    # Target maximum ~100mm for large dimension
+                    max_target_mm = 100.0
+                    scale_factor = min(max_target_mm / max(svg_width, svg_height), 1.0)
+                    
+                    if scale_factor < 1.0:
+                        self.logger.info(f"Scaling SVG coordinates by {scale_factor:.3f} (from {svg_width:.1f}x{svg_height:.1f} to reasonable size)")
+                        width_mm = svg_width * scale_factor + 2 * float(self.canvas_margin_var.get())
+                        height_mm = svg_height * scale_factor + 2 * float(self.canvas_margin_var.get())
+                    else:
+                        # SVG coordinates are already reasonable
+                        width_mm = svg_width + 2 * float(self.canvas_margin_var.get())
+                        height_mm = svg_height + 2 * float(self.canvas_margin_var.get())
+            # Note: Simple bin mode already returns width_mm and height_mm from simple_bin_layout()
             
-            self.logger.debug(f"Canvas dimensions before binning: {width_mm:.2f}x{height_mm:.2f}mm")
+            if not self.use_simple_bins_var.get():
+                # SVG mode - apply binning and recentering
+                self.logger.debug(f"Canvas dimensions before binning: {width_mm:.2f}x{height_mm:.2f}mm")
 
-            bin_mm = float(self.canvas_bin_var.get())
-            if bin_mm > 0:
-                def round_up(v: float, b: float) -> float:
-                    n = int((v + b - 1e-9) // b)
-                    return (n + (0 if abs(n * b - v) < 1e-9 else 1)) * b
-                width_mm = round_up(width_mm, bin_mm)
-                height_mm = round_up(height_mm, bin_mm)
+                bin_mm = float(self.canvas_bin_var.get())
+                if bin_mm > 0:
+                    def round_up(v: float, b: float) -> float:
+                        n = int((v + b - 1e-9) // b)
+                        return (n + (0 if abs(n * b - v) < 1e-9 else 1)) * b
+                    width_mm = round_up(width_mm, bin_mm)
+                    height_mm = round_up(height_mm, bin_mm)
 
-            # Recenter
-            cx = (minx + maxx) / 2.0
-            cy = (miny + maxy) / 2.0
-            for pl in placements:
-                x, y = pl.center_xy_mm
-                pl.center_xy_mm = (x - cx, y - cy)
+                # Recenter for SVG mode
+                cx = (minx + maxx) / 2.0
+                cy = (miny + maxy) / 2.0
+                for pl in placements:
+                    x, y = pl.center_xy_mm
+                    pl.center_xy_mm = (x - cx, y - cy)
+            else:
+                # Simple bin mode - placements are already centered around origin
+                self.logger.debug(f"Simple bin mode: canvas {width_mm:.1f}x{height_mm:.1f}mm, placements already centered")
 
             # DPI selection
             target_mb = float(self.target_mb_var.get()) if self.target_mb_var.get() else 0.0
@@ -560,6 +627,8 @@ class NanoPrintGUI(tk.Tk):
                     canvas_height_mm=height_mm,
                     origin_center=True,
                     page_margins_mm=page_margins_mm,
+                    standard_page_width_px=standard_page_width_px,
+                    standard_page_height_px=standard_page_height_px,
                 )
                 self.logger.debug(f"Render successful, raster size: {raster.size}")
             except Exception as render_error:
