@@ -1,14 +1,1 @@
-2025-08-11 19:25:58,896 - INFO - test_isolated_functions:39 - Logging initialized. Debug log: nanorosetta_debug.log
-2025-08-11 19:25:58,896 - INFO - test_isolated_functions:46 - Testing INFO level
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:47 - Testing DEBUG level (should be in file only)
-2025-08-11 19:25:58,896 - WARNING - test_isolated_functions:48 - Testing WARNING level
-2025-08-11 19:25:58,896 - ERROR - test_isolated_functions:49 - Testing ERROR level
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:78 - Validating canvas dimensions: 100.00x100.00mm at 300 DPI
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:86 - Calculated pixel dimensions: 1181x1181 pixels
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:107 - Canvas dimensions are within safe limits
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:78 - Validating canvas dimensions: 1000.00x1000.00mm at 2400 DPI
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:86 - Calculated pixel dimensions: 94488x94488 pixels
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:107 - Canvas dimensions are within safe limits
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:78 - Validating canvas dimensions: 5000.00x5000.00mm at 1200 DPI
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:86 - Calculated pixel dimensions: 236220x236220 pixels
-2025-08-11 19:25:58,896 - DEBUG - test_isolated_functions:107 - Canvas dimensions are within safe limits
+2025-08-16 23:49:04,945 - INFO - cli:53 - Logging initialized. Debug log: nanorosetta_debug.log
