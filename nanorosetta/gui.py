@@ -396,15 +396,19 @@ class NanoPrintGUI(tk.Tk):
 
             # Choose layout approach based on mode
             if self.use_simple_bins_var.get():
-                # Simple bin mode - skip SVG parsing
+                # Simple bin mode - skip SVG parsing, work entirely in pixels
                 self.logger.debug("Using simple bin mode - no SVG parsing needed")
                 dpi = int(self.tiff_dpi_var.get())
-                placements, width_mm, height_mm = simple_bin_layout(
+                placements, width_px, height_px = simple_bin_layout(
                     pages, 
                     int(self.bin_width_var.get()), 
                     int(self.bin_height_var.get()),
                     dpi
                 )
+                # Convert pixel canvas to mm for render system
+                width_mm = width_px * 25.4 / dpi
+                height_mm = height_px * 25.4 / dpi
+                self.logger.info(f"Simple bin canvas: {width_px}×{height_px}px = {width_mm:.1f}×{height_mm:.1f}mm at {dpi} DPI")
             else:
                 # Traditional SVG-based approach
                 # Shapes and region - support both combined and separate SVG approaches

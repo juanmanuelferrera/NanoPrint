@@ -144,8 +144,8 @@ def simple_bin_layout(pages: List[PageSpec], bin_width: int, bin_height: int, dp
     # Convert bin placements to standard Placement objects
     placements = []
     for i, bin_placement in enumerate(bin_placements):
-        # Convert pixel coordinates to mm for compatibility with existing render system
-        center_x_mm = bin_placement.center_x * 25.4 / dpi  # Use provided DPI for mm conversion
+        # Convert pixel coordinates to mm for render system compatibility
+        center_x_mm = bin_placement.center_x * 25.4 / dpi
         center_y_mm = bin_placement.center_y * 25.4 / dpi
         width_mm = bin_placement.bin_width * 25.4 / dpi
         height_mm = bin_placement.bin_height * 25.4 / dpi
@@ -161,13 +161,13 @@ def simple_bin_layout(pages: List[PageSpec], bin_width: int, bin_height: int, dp
         )
         placements.append(placement)
     
-    # Calculate canvas size (circle diameter plus some margin)
+    # Calculate canvas size (circle diameter plus some margin) - return pixels
     margin_px = max(bin_width, bin_height) * 0.1  # 10% margin
     canvas_size_px = (circle_radius * 2) + (margin_px * 2)
-    canvas_width_mm = canvas_size_px * 25.4 / dpi  # Convert to mm using provided DPI
-    canvas_height_mm = canvas_width_mm  # Square canvas
+    canvas_width_px = canvas_size_px
+    canvas_height_px = canvas_width_px  # Square canvas
     
     logging.info(f"Simple bin layout complete: {len(placements)} placements, "
-                f"canvas: {canvas_width_mm:.1f}x{canvas_height_mm:.1f}mm")
+                f"canvas: {canvas_width_px:.0f}x{canvas_height_px:.0f}px")
     
-    return placements, canvas_width_mm, canvas_height_mm
+    return placements, canvas_width_px, canvas_height_px
