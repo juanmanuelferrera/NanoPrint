@@ -116,40 +116,50 @@ class NanoFichePacker:
         """Pack bins into rectangular envelope using grid layout."""
         target_aspect_ratio = envelope_spec.aspect_ratio
         
-        # Calculate optimal grid dimensions
-        # For rectangular packing: canvas_width/canvas_height = target_aspect_ratio
-        # canvas_width = cols * bin_width, canvas_height = rows * bin_height
-        # Therefore: (cols * bin_width) / (rows * bin_height) = target_aspect_ratio
-        # cols/rows = target_aspect_ratio * bin_height/bin_width
+        # Calculate optimal grid dimensions using proper algorithm
+        # We want: (cols * bin_width) / (rows * bin_height) = target_aspect_ratio
+        # And: rows * cols >= num_bins (to fit all bins)
+        # Solve: cols = target_aspect_ratio * rows * bin_height / bin_width
         
         bin_aspect = self.bin_width / self.bin_height
-        target_cols_per_row = target_aspect_ratio / bin_aspect
         
-        # Find best integer solution
-        best_efficiency = 0
+        # Start with square-ish arrangement and adjust for aspect ratio
+        ideal_side = math.sqrt(num_bins)
+        
+        # Calculate reasonable range of rows to test (not all possibilities!)
+        min_rows = max(1, int(ideal_side * 0.5))
+        max_rows = min(num_bins, int(ideal_side * 2.0))
+        
+        self.logger.debug(f"Testing rows from {min_rows} to {max_rows} for {num_bins} bins")
+        
         best_result = None
+        best_score = -1
         
-        # Test different row counts
-        for rows in range(1, num_bins + 1):
+        for rows in range(min_rows, max_rows + 1):
+            # Calculate columns needed
             cols = math.ceil(num_bins / rows)
-            if rows * cols < num_bins:
-                continue
-                
-            # Calculate aspect ratio for this configuration
+            
+            # Calculate actual canvas dimensions
             canvas_width = cols * self.bin_width
             canvas_height = rows * self.bin_height
             actual_aspect = canvas_width / canvas_height
             
-            # Efficiency is based on bins used and aspect ratio match
-            bins_used = min(num_bins, rows * cols)
-            space_efficiency = bins_used / (rows * cols)
+            # Calculate how well this matches target aspect ratio
             aspect_error = abs(actual_aspect - target_aspect_ratio) / target_aspect_ratio
             
-            # Combined efficiency (weight space efficiency more heavily)
-            efficiency = space_efficiency * 0.8 - aspect_error * 0.2
+            # Calculate space efficiency
+            total_slots = rows * cols
+            space_efficiency = num_bins / total_slots
             
-            if efficiency > best_efficiency:
-                best_efficiency = efficiency
+            # Combined score (prioritize space efficiency, penalize aspect error)
+            score = space_efficiency - (aspect_error * 0.1)
+            
+            self.logger.debug(f"  {rows}x{cols}: canvas {canvas_width}x{canvas_height}, "
+                            f"aspect {actual_aspect:.3f} (target {target_aspect_ratio:.3f}), "
+                            f"efficiency {space_efficiency:.3f}, score {score:.3f}")
+            
+            if score > best_score:
+                best_score = score
                 
                 # Generate placement coordinates
                 placements = []
@@ -167,13 +177,19 @@ class NanoFichePacker:
                     canvas_height=canvas_height,
                     envelope_width=canvas_width,
                     envelope_height=canvas_height,
-                    total_bins=rows * cols,
+                    total_bins=total_slots,
                     bins_placed=num_bins,
                     placements=placements,
                     efficiency=space_efficiency
                 )
         
-        return best_result or self._fallback_rectangle_packing(num_bins)
+        if best_result:
+            self.logger.info(f"Selected grid: {best_result.rows}x{best_result.columns} "
+                           f"for {num_bins} bins, efficiency: {best_result.efficiency:.1%}")
+            return best_result
+        else:
+            self.logger.warning("No good grid found, using fallback")
+            return self._fallback_rectangle_packing(num_bins)
     
     def pack_circle(self, num_bins: int) -> PackingResult:
         """Pack bins into circular envelope using adapted spiral algorithm."""

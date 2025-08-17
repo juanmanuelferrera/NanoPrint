@@ -56,11 +56,17 @@ class NanoFicheRenderer:
         canvas = Image.new('RGB', (preview_width, preview_height), color='white')
         
         # Place images
-        for i, (x, y) in enumerate(packing_result.placements[:len(image_bins)]):
-            if i >= len(image_bins):
+        self.logger.info(f"Preview: Placing {len(image_bins)} images")
+        for i in range(len(image_bins)):
+            if i >= len(packing_result.placements):
+                self.logger.error(f"Preview: Missing placement for image {i}")
                 break
                 
+            x, y = packing_result.placements[i]
             image_bin = image_bins[i]
+            
+            if i < 3:  # Debug first few
+                self.logger.info(f"Preview image {i}: pos=({x},{y}) file={image_bin.file_path.name}")
             
             try:
                 # Load and resize image
@@ -136,18 +142,38 @@ class NanoFicheRenderer:
             
             # Place images at full resolution
             images_placed = 0
-            for i, (x, y) in enumerate(packing_result.placements[:len(image_bins)]):
-                if i >= len(image_bins):
+            
+            # Debug: Log packing info
+            self.logger.info(f"Placing {len(image_bins)} images in {packing_result.rows}x{packing_result.columns} grid")
+            self.logger.info(f"Canvas: {canvas_width}x{canvas_height}, Placements: {len(packing_result.placements)}")
+            
+            # Verify we have the right number of placements
+            if len(packing_result.placements) < len(image_bins):
+                self.logger.error(f"Not enough placements! Have {len(packing_result.placements)}, need {len(image_bins)}")
+                return
+            
+            for i in range(len(image_bins)):
+                if i >= len(packing_result.placements):
+                    self.logger.error(f"Missing placement for image {i}")
                     break
                     
+                x, y = packing_result.placements[i]
                 image_bin = image_bins[i]
                 
                 try:
                     # Load image
                     with Image.open(image_bin.file_path) as img:
-                        # Calculate bin dimensions
-                        bin_width = packing_result.canvas_width // packing_result.columns
-                        bin_height = packing_result.canvas_height // packing_result.rows
+                        # Calculate bin dimensions - use the packer's original bin size
+                        bin_width = canvas_width // packing_result.columns
+                        bin_height = canvas_height // packing_result.rows
+                        
+                        # Debug first few and last few placements
+                        if i < 5 or i >= len(image_bins) - 5:
+                            self.logger.info(f"Image {i}: pos=({x},{y}), bin_size={bin_width}x{bin_height}, file={image_bin.file_path.name}")
+                        
+                        # Count every 10th image for large sets
+                        if i % 10 == 0:
+                            self.logger.info(f"Placing image {i}/{len(image_bins)}: pos=({x},{y})")
                         
                         # Resize image to fit within bin (maintain aspect ratio)
                         img_resized = self._resize_image_to_fit(img, bin_width, bin_height)
