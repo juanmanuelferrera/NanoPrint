@@ -27,6 +27,7 @@ python nanoprint.py
 - Click Run to generate outputs (PDF proof and/or TIFF)
 
 **Recent Improvements:**
+- **TIFF DPI Metadata Fix**: TIFF files now correctly use actual rendering DPI instead of hardcoded 200 DPI
 - **Optimized Packing Algorithms**: Advanced shape-aware packing for maximum space utilization
 - **Inner Shape Intelligence**: Analyzes inner shape constraints for optimal placement strategies
 - **Pixel-First Layout**: Direct pixel calculations for consistent quality without DPI dependencies
@@ -219,6 +220,7 @@ python -m nanorosetta.cli compose --help
 - ✅ PDF proof downsampling eliminates PyMuPDF overflow
 - ✅ Single page conservative sizing avoids memory issues
 - ✅ Content-based canvas fits actual page layout
+- ✅ TIFF DPI metadata now correctly matches rendering DPI
 
 **If you still encounter issues:**
 ```bash
@@ -241,6 +243,12 @@ python -m nanorosetta.cli compose \
 
 ## Latest Features & Fixes
 
+### TIFF DPI Metadata Fix (Latest)
+- **Correct DPI Metadata**: TIFF files now save with actual rendering DPI instead of hardcoded 200 DPI
+- **Proper Display Scaling**: Image viewers now display TIFF files at correct physical sizes
+- **CLI & GUI Fixed**: Both command-line and graphical interfaces properly pass DPI to TIFF save functions
+- **Resolution Accuracy**: TIFF metadata now accurately reflects the rendering resolution used
+
 ### Advanced Packing Engine (New)
 - **Shape-Aware Packing**: Analyzes SVG geometry (rectangular, square, elongated, complex) and adapts packing strategy accordingly
 - **Inner Shape Intelligence**: Detects central, offset, or distributed inner shapes and optimizes placement strategies
@@ -258,7 +266,7 @@ python -m nanorosetta.cli compose \
 ### Pixel-First Layout (New)
 - **Direct Pixel Calculations**: Calculate exact canvas size needed without DPI dependencies
 - **Aspect Ratio Preservation**: Ensures square SVGs produce square canvases by adjusting grid ratios
-- **Consistent Quality**: Fixed 200 DPI metadata with pixel-based dimensions for predictable output
+- **Accurate DPI Metadata**: TIFF files now use actual rendering DPI for correct physical dimensions
 - **Large Layout Support**: Handles 1000+ pages efficiently with optimized pixel calculations
 
 ### Smart Layout Engine
